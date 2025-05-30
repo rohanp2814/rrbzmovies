@@ -1,8 +1,6 @@
 import json
 import logging
 import asyncio
-from datetime import timedelta
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -14,13 +12,6 @@ API_HASH = '9ef2ceed3bd6ac525020d757980f6864'
 BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
 CHANNEL_ID = -1002244686281
 
-# Load index
-with open('video_index.json', 'r', encoding='utf-8') as f:
-    video_index = json.load(f)
-
-titles = list(video_index.keys())
-id_map = video_index
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -28,6 +19,23 @@ tg_client = TelegramClient("anon", API_ID, API_HASH)
 
 NOT_FOUND_LOG = "not_found.log"
 RESULTS_PER_PAGE = 5
+
+# Global variables to hold index and titles
+video_index = {}
+titles = []
+
+def load_index():
+    global video_index, titles
+    try:
+        with open('video_index.json', 'r', encoding='utf-8') as f:
+            video_index = json.load(f)
+        titles = list(video_index.keys())
+        logger.info("Video index reloaded successfully.")
+    except Exception as e:
+        logger.error(f"Failed to load video index: {e}")
+
+# Load index initially when bot starts
+load_index()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hi! Use /search <movie_name> to find movies.")
@@ -47,7 +55,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     query = " ".join(context.args).strip()
-    matches = [(title, id_map[title]) for title in titles if query.lower() in title.lower()]
+    matches = [(title, video_index[title]) for title in titles if query.lower() in title.lower()]
 
     if not matches:
         logger.info(f"Search not found: {query}")
@@ -68,7 +76,7 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     for title, _ in page_matches:
         text += f"• {title}\n"
 
-    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")]
+    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] 
                for title, msg_id in page_matches]
 
     nav_buttons = []
@@ -157,6 +165,10 @@ async def prev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['page'] -= 1
     await send_results(update, context)
 
+async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    load_index()
+    await update.message.reply_text("🔄 Video index reloaded successfully!")
+
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sorry, I didn't understand that command.")
 
@@ -164,6 +176,7 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler('start', start))
 app.add_handler(CommandHandler('search', search_command))
+app.add_handler(CommandHandler('reloadindex', reloadindex_command))  # New command added here
 app.add_handler(CommandHandler('next', next_command))
 app.add_handler(CommandHandler('prev', prev_command))
 app.add_handler(CallbackQueryHandler(button_handler))
