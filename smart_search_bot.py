@@ -50,6 +50,9 @@ def get_page(matches, page):
     return matches[start:end]
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Reload index fresh every time before searching
+    load_index()
+
     if not context.args:
         await update.message.reply_text("Please provide a search query, e.g. /search raid")
         return
@@ -176,7 +179,7 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler('start', start))
 app.add_handler(CommandHandler('search', search_command))
-app.add_handler(CommandHandler('reloadindex', reloadindex_command))  # New command added here
+app.add_handler(CommandHandler('reloadindex', reloadindex_command))  # Manual reload still available
 app.add_handler(CommandHandler('next', next_command))
 app.add_handler(CommandHandler('prev', prev_command))
 app.add_handler(CallbackQueryHandler(button_handler))
