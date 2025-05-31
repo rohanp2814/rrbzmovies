@@ -1,42 +1,90 @@
 import json
 import logging
 import asyncio
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 )
 from telethon.sync import TelegramClient
+import os
 
-API_ID = '26611044'
-API_HASH = '9ef2ceed3bd6ac525020d757980f6864'
-BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
-CHANNEL_ID = -1002244686281
+# Telegram API credentials
 
+
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+
+SESSION_NAME = "anon"
+
+# Initialize clients and logging
+tg_client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-tg_client = TelegramClient("anon", API_ID, API_HASH)
-
 NOT_FOUND_LOG = "not_found.log"
 RESULTS_PER_PAGE = 5
-
-# Global variables to hold index and titles
 video_index = {}
 titles = []
 
+# Normalize titles
+def normalize_title(title):
+    return re.sub(r'[\W_]+', '', title).lower()
+
+# Load video index
 def load_index():
     global video_index, titles
     try:
         with open('video_index.json', 'r', encoding='utf-8') as f:
             video_index = json.load(f)
         titles = list(video_index.keys())
-        logger.info("Video index reloaded successfully.")
+        logger.info(f"Video index loaded with {len(titles)} entries.")
     except Exception as e:
-        logger.error(f"Failed to load video index: {e}")
+        logger.error(f"Failed to load index: {e}")
 
-# Load index initially when bot starts
-load_index()
+# Refresh and update video index from channel
+async def fetch_and_update_index():
+    async with TelegramClient(SESSION_NAME, API_ID, API_HASH) as client:
+        logger.info("Fetching messages from channel...")
+        messages = await client.get_messages(CHANNEL_ID, limit=5000)
 
+        try:
+            with open("video_index.json", "r", encoding="utf-8") as f:
+                video_index = json.load(f)
+        except FileNotFoundError:
+            video_index = {}
+
+        new_count = 0
+
+        for msg in messages:
+            if msg.video or msg.document:
+                filename = None
+                if msg.document and msg.document.attributes:
+                    for attr in msg.document.attributes:
+                        if hasattr(attr, 'file_name'):
+                            filename = attr.file_name
+                            break
+                if not filename and msg.message:
+                    filename = msg.message.strip()[:100]
+                if not filename:
+                    continue
+                norm_title = normalize_title(filename)
+                if norm_title not in video_index:
+                    video_index[norm_title] = msg.id
+                    new_count += 1
+                elif video_index[norm_title] != msg.id:
+                    video_index[norm_title] = msg.id  # update with latest
+                    new_count += 1
+
+        with open("video_index.json", "w", encoding="utf-8") as f:
+            json.dump(video_index, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"✅ New entries added: {new_count}")
+        return new_count
+
+# Bot commands
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hi! Use /search <movie_name> to find movies.")
 
@@ -50,15 +98,14 @@ def get_page(matches, page):
     return matches[start:end]
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Reload index fresh every time before searching
     load_index()
-
     if not context.args:
         await update.message.reply_text("Please provide a search query, e.g. /search raid")
         return
 
     query = " ".join(context.args).strip()
-    matches = [(title, video_index[title]) for title in titles if query.lower() in title.lower()]
+    norm_query = normalize_title(query)
+    matches = [(title, video_index[title]) for title in titles if norm_query in normalize_title(title)]
 
     if not matches:
         logger.info(f"Search not found: {query}")
@@ -79,7 +126,7 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     for title, _ in page_matches:
         text += f"• {title}\n"
 
-    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] 
+    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")]
                for title, msg_id in page_matches]
 
     nav_buttons = []
@@ -91,7 +138,6 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
         buttons.append(nav_buttons)
 
     reply_markup = InlineKeyboardMarkup(buttons)
-
     if isinstance(update_or_query, Update):
         await update_or_query.message.reply_text(text, reply_markup=reply_markup)
     else:
@@ -101,36 +147,29 @@ async def delete_message_after(chat_id: int, message_id: int, context: ContextTy
     await asyncio.sleep(55 * 60)
     try:
         await context.bot.send_message(chat_id, "⏳ Movie will be deleted in 5 minutes...")
-    except Exception as e:
-        logger.warning(f"Couldn't send deletion warning: {e}")
-
+    except:
+        pass
     await asyncio.sleep(5 * 60)
     try:
         await context.bot.delete_message(chat_id, message_id)
-    except Exception as e:
-        logger.warning(f"Couldn't delete movie message: {e}")
+    except:
+        pass
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     data = query.data
 
     if data == "next_page":
         context.user_data['page'] += 1
         await send_results(query, context)
-        return
     elif data == "prev_page":
         context.user_data['page'] -= 1
         await send_results(query, context)
-        return
     elif data == "back_to_results":
         await send_results(query, context)
-        return
-
-    if data.startswith("movie_"):
+    elif data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
-
         await query.edit_message_text("🎬 Sending your movie...")
         await tg_client.start()
         try:
@@ -139,49 +178,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from_chat_id=CHANNEL_ID,
                 message_id=msg_id
             )
+            context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
         except Exception as e:
             await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
-            await tg_client.disconnect()
-            return
-
         await tg_client.disconnect()
-        context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
-
-        # Show back button
         back_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")]
         ])
         await query.message.reply_text("🔍 Want to pick another movie?", reply_markup=back_markup)
 
-async def next_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if 'matches' not in context.user_data:
-        await update.message.reply_text("You haven't searched yet. Use /search <query> first.")
-        return
-    context.user_data['page'] += 1
-    await send_results(update, context)
+# /refresh command
+async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔄 Refreshing video index. Please wait...")
+    count = await fetch_and_update_index()
+    load_index()
+    await update.message.reply_text(f"✅ Index refreshed! {count} new entries added.")
 
-async def prev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if 'matches' not in context.user_data:
-        await update.message.reply_text("You haven't searched yet. Use /search <query> first.")
-        return
-    if context.user_data['page'] > 0:
-        context.user_data['page'] -= 1
-    await send_results(update, context)
-
+# Extra commands
 async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
-    await update.message.reply_text("🔄 Video index reloaded successfully!")
+    await update.message.reply_text("✅ Index reloaded.")
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sorry, I didn't understand that command.")
 
+# Bot entry point
 app = ApplicationBuilder().token(BOT_TOKEN).build()
-
 app.add_handler(CommandHandler('start', start))
 app.add_handler(CommandHandler('search', search_command))
-app.add_handler(CommandHandler('reloadindex', reloadindex_command))  # Manual reload still available
-app.add_handler(CommandHandler('next', next_command))
-app.add_handler(CommandHandler('prev', prev_command))
+app.add_handler(CommandHandler('reloadindex', reloadindex_command))
+app.add_handler(CommandHandler('refresh', refresh_command))  # 👈 Added refresh command
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
