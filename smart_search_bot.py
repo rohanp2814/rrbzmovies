@@ -7,16 +7,12 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 )
 from telethon.sync import TelegramClient
-import os
 
 # Telegram API credentials
-
-
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-
+API_ID = '26611044'
+API_HASH = '9ef2ceed3bd6ac525020d757980f6864'
+BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
+CHANNEL_ID = -1002244686281
 SESSION_NAME = "anon"
 
 # Initialize clients and logging
