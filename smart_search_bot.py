@@ -2,9 +2,13 @@ import json
 import logging
 import asyncio
 import re
+import threading
+import os
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    ContextTypes, MessageHandler, filters
 )
 from telethon.sync import TelegramClient
 
@@ -101,9 +105,8 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = " ".join(context.args).strip()
     norm_query = normalize_title(query)
-    # Sort titles so latest video ID (higher msg.id) is first
     matches = [(title, video_index[title]) for title in titles if norm_query in normalize_title(title)]
-    matches.sort(key=lambda x: x[1], reverse=True)  # Latest (highest msg.id) on top
+    matches.sort(key=lambda x: x[1], reverse=True)
 
     if not matches:
         logger.info(f"Search not found: {query}")
@@ -200,13 +203,14 @@ async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sorry, I didn't understand that command.")
 
-# Run refresh at startup inside bot's event loop to avoid conflicts
+# Run refresh at startup inside bot's event loop
 async def on_startup(app):
     logger.info("Starting up: refreshing index...")
     await fetch_and_update_index()
     load_index()
     logger.info("Startup index refresh complete.")
 
+# Initialize the bot
 app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
 
 # Add handlers
@@ -217,5 +221,22 @@ app.add_handler(CommandHandler('refresh', refresh_command))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
-print("🤖 Bot is running... Press Ctrl+C to stop.")
+print("🤖 Bot is running...")
+
+# 🧠 Minimal Flask app to keep Render alive
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "✅ Bot is alive!", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host='0.0.0.0', port=port)
+
+# Start Flask server in background
+threading.Thread(target=run_flask).start()
+
+# Start the bot
 app.run_polling()
+
