@@ -120,12 +120,8 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         suggestions = get_close_matches(norm_query, titles, n=3, cutoff=0.5)
         suggestion_text = "\n".join(suggestions) if suggestions else "No close matches found."
         await log_not_found(query)
-        await update.message.reply_text(
-            f"❌ Movie not found.\n
-🔍 Suggestions:
-{suggestion_text}"
-        )
-        return
+       await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
+       return
 
     context.user_data['matches'] = matches
     context.user_data['page'] = 0
