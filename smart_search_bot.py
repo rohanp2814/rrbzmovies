@@ -3,9 +3,11 @@ import logging
 import asyncio
 import re
 from threading import Thread
+from difflib import get_close_matches
 
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
@@ -19,7 +21,6 @@ BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
 CHANNEL_ID = -1002244686281
 SESSION_NAME = "anon"
 
-# Initialize clients and logging
 tg_client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,23 +30,12 @@ RESULTS_PER_PAGE = 5
 video_index = {}
 titles = []
 
-# List of unwanted prefixes to remove from filenames
 UNWANTED_PREFIXES = [
-    'badshahpiratesofficial',
-    'mishrimovieshd',
-    'badshahpiratesoffical',
-    'badshahpirates',
-    'badshah',
-    'mishrimovies',
-    'mishri',
-    'pirates',
-    'official',
-    'offical',
-    'runningmovieshd',
-    '@RunningMoviesHD'
+    'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
+    'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'pirates',
+    'official', 'offical', 'runningmovieshd', '@RunningMoviesHD'
 ]
 
-# Normalize titles
 def normalize_title(title):
     title = title.lower().strip()
     for prefix in UNWANTED_PREFIXES:
@@ -55,7 +45,6 @@ def normalize_title(title):
     title = re.sub(r'[^\w\.\-_ ]', '', title)
     return title
 
-# Load video index
 def load_index():
     global video_index, titles
     try:
@@ -66,12 +55,10 @@ def load_index():
     except Exception as e:
         logger.error(f"Failed to load index: {e}")
 
-# Refresh and update video index from channel
 async def fetch_and_update_index():
     async with TelegramClient(SESSION_NAME, API_ID, API_HASH) as client:
         logger.info("Fetching messages from channel...")
         messages = await client.get_messages(CHANNEL_ID, limit=5000)
-
         try:
             with open("video_index.json", "r", encoding="utf-8") as f:
                 current_index = json.load(f)
@@ -103,47 +90,21 @@ async def fetch_and_update_index():
         logger.info(f"✅ New entries added: {new_count}")
         return new_count
 
-# Bot commands
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hi! Use /search <movie_name> to find movies.")
 
 async def log_not_found(query: str):
     with open(NOT_FOUND_LOG, "a", encoding="utf-8") as f:
-        f.write(f"{query}\n")
+        f.write(f"{query}
+")
 
 def get_page(matches, page):
     start = page * RESULTS_PER_PAGE
     end = start + RESULTS_PER_PAGE
     return matches[start:end]
 
-# New helper to create pagination buttons with page numbers
-def create_pagination_buttons(current_page, total_pages):
-    buttons = []
-    page_buttons = []
-
-    # Show up to 5 page buttons around current page
-    start_page = max(0, current_page - 2)
-    end_page = min(total_pages, current_page + 3)
-
-    for p in range(start_page, end_page):
-        if p == current_page:
-            # Current page: show with filled circle to indicate active
-            page_buttons.append(InlineKeyboardButton(f"⬤ {p+1}", callback_data=f"page_{p}"))
-        else:
-            page_buttons.append(InlineKeyboardButton(str(p+1), callback_data=f"page_{p}"))
-
-    buttons.append(page_buttons)
-
-    nav_buttons = []
-    if current_page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page_{current_page-1}"))
-    if current_page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{current_page+1}"))
-
-    if nav_buttons:
-        buttons.append(nav_buttons)
-
-    return buttons
+async def send_typing(context, chat_id):
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
@@ -157,9 +118,14 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matches.sort(key=lambda x: x[1], reverse=True)
 
     if not matches:
-        logger.info(f"Search not found: {query}")
+        suggestions = get_close_matches(norm_query, titles, n=3, cutoff=0.5)
+        suggestion_text = "\n".join(suggestions) if suggestions else "No close matches found."
         await log_not_found(query)
-        await update.message.reply_text("❌ Movie not found. Please check the spelling and try again.")
+        await update.message.reply_text(
+            f"❌ Movie not found.\n
+🔍 Suggestions:
+{suggestion_text}"
+        )
         return
 
     context.user_data['matches'] = matches
@@ -169,18 +135,29 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     matches = context.user_data.get('matches', [])
     page = context.user_data.get('page', 0)
-    total_pages = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
     page_matches = get_page(matches, page)
 
-    text = f"🎬 Select a movie (Page {page + 1} of {total_pages}):"
+    text = f"🎬 Page {page + 1} Results:
 
+"
+    for title, _ in page_matches:
+        text += f"• {title.title()}
+"
 
-    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
-    pagination_buttons = create_pagination_buttons(page, total_pages)
-    buttons.extend(pagination_buttons)
+    buttons = [[InlineKeyboardButton(f"🎬 {title.title()[:50]}", callback_data=f"movie_{msg_id}")]
+               for title, msg_id in page_matches]
+
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data="prev_page"))
+    if (page + 1) * RESULTS_PER_PAGE < len(matches):
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data="next_page"))
+    if nav_buttons:
+        buttons.append(nav_buttons)
 
     reply_markup = InlineKeyboardMarkup(buttons)
     if isinstance(update_or_query, Update):
+        await send_typing(context, update_or_query.effective_chat.id)
         await update_or_query.message.reply_text(text, reply_markup=reply_markup)
     else:
         await update_or_query.edit_message_text(text, reply_markup=reply_markup)
@@ -202,11 +179,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    if data.startswith("page_"):
-        page_num = int(data.split("_")[1])
-        context.user_data['page'] = page_num
+    if data == "next_page":
+        context.user_data['page'] += 1
         await send_results(query, context)
-
+    elif data == "prev_page":
+        context.user_data['page'] -= 1
+        await send_results(query, context)
+    elif data == "back_to_results":
+        await send_results(query, context)
     elif data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
         await query.edit_message_text("🎬 Sending your movie...")
@@ -221,31 +201,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
         await tg_client.disconnect()
-        back_markup = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")
-        ]])
+        back_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")]
+        ])
         await query.message.reply_text("🔍 Want to pick another movie?", reply_markup=back_markup)
 
-    elif data == "back_to_results":
-        await send_results(query, context)
-
-    else:
-        # fallback for legacy next/prev (optional)
-        if data == "next_page":
-            context.user_data['page'] += 1
-            await send_results(query, context)
-        elif data == "prev_page":
-            context.user_data['page'] -= 1
-            await send_results(query, context)
-
-# /refresh command
 async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Refreshing video index. Please wait...")
     count = await fetch_and_update_index()
     load_index()
     await update.message.reply_text(f"✅ Index refreshed! {count} new entries added.")
 
-# Extra commands
 async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
     await update.message.reply_text("✅ Index reloaded.")
@@ -253,16 +219,13 @@ async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sorry, I didn't understand that command.")
 
-# Run refresh at startup inside bot's event loop
 async def on_startup(app):
     logger.info("Starting up: refreshing index...")
     await fetch_and_update_index()
     load_index()
     logger.info("Startup index refresh complete.")
 
-# Flask app for health check
 flask_app = Flask(__name__)
-
 @flask_app.route("/")
 def home():
     return "Bot is running"
@@ -270,10 +233,7 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=8080)
 
-# Initialize the Telegram bot app
 app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
-
-# Add handlers
 app.add_handler(CommandHandler('start', start))
 app.add_handler(CommandHandler('search', search_command))
 app.add_handler(CommandHandler('reloadindex', reloadindex_command))
@@ -283,9 +243,6 @@ app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
 print("🤖 Bot is running...")
 
-# Run Flask in a separate thread so both bot and server run simultaneously
 flask_thread = Thread(target=run_flask)
 flask_thread.start()
-
-# Start Telegram bot polling (blocking call)
 app.run_polling()
