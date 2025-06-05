@@ -2,6 +2,9 @@ import json
 import logging
 import asyncio
 import re
+from threading import Thread
+
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
@@ -26,7 +29,7 @@ RESULTS_PER_PAGE = 5
 video_index = {}
 titles = []
 
-# Improved normalization: remove all unwanted words, not just prefixes
+# List of unwanted prefixes to remove from filenames
 UNWANTED_PREFIXES = [
     'badshahpiratesofficial',
     'mishrimovieshd',
@@ -41,20 +44,17 @@ UNWANTED_PREFIXES = [
     'runningmovieshd'
 ]
 
+# Normalize titles
 def normalize_title(title):
-    title = title.lower()
-    title = title.replace('_', ' ').replace('-', ' ')
-    
+    title = title.lower().strip()
     for prefix in UNWANTED_PREFIXES:
-        title = title.replace(prefix, ' ')
-    
+        if title.startswith(prefix):
+            title = title[len(prefix):].strip()
     title = re.sub(r'\s+', ' ', title)
-    title = re.sub(r'[^\w\s\.\-]', '', title)
-    return title.strip()
+    title = re.sub(r'[^\w\.\-_ ]', '', title)
+    return title
 
-
-
-
+# Load video index
 def load_index():
     global video_index, titles
     try:
@@ -65,6 +65,7 @@ def load_index():
     except Exception as e:
         logger.error(f"Failed to load index: {e}")
 
+# Refresh and update video index from channel
 async def fetch_and_update_index():
     async with TelegramClient(SESSION_NAME, API_ID, API_HASH) as client:
         logger.info("Fetching messages from channel...")
@@ -72,9 +73,9 @@ async def fetch_and_update_index():
 
         try:
             with open("video_index.json", "r", encoding="utf-8") as f:
-                video_index = json.load(f)
+                current_index = json.load(f)
         except FileNotFoundError:
-            video_index = {}
+            current_index = {}
 
         new_count = 0
 
@@ -91,18 +92,17 @@ async def fetch_and_update_index():
                 if not filename:
                     continue
                 norm_title = normalize_title(filename)
-                if norm_title not in video_index or video_index[norm_title] != msg.id:
-                    video_index[norm_title] = msg.id
+                if norm_title not in current_index or current_index[norm_title] != msg.id:
+                    current_index[norm_title] = msg.id
                     new_count += 1
 
         with open("video_index.json", "w", encoding="utf-8") as f:
-            json.dump(video_index, f, indent=2, ensure_ascii=False)
+            json.dump(current_index, f, indent=2, ensure_ascii=False)
 
         logger.info(f"✅ New entries added: {new_count}")
         return new_count
 
-# --- Bot command handlers ---
-
+# Bot commands
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hi! Use /search <movie_name> to find movies.")
 
@@ -205,12 +205,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await query.message.reply_text("🔍 Want to pick another movie?", reply_markup=back_markup)
 
+# /refresh command
 async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Refreshing video index. Please wait...")
     count = await fetch_and_update_index()
     load_index()
     await update.message.reply_text(f"✅ Index refreshed! {count} new entries added.")
 
+# Extra commands
 async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
     await update.message.reply_text("✅ Index reloaded.")
@@ -218,13 +220,24 @@ async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sorry, I didn't understand that command.")
 
+# Run refresh at startup inside bot's event loop
 async def on_startup(app):
     logger.info("Starting up: refreshing index...")
     await fetch_and_update_index()
     load_index()
     logger.info("Startup index refresh complete.")
 
-# Initialize the bot
+# Flask app for health check
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "Bot is running"
+
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=8080)
+
+# Initialize the Telegram bot app
 app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
 
 # Add handlers
@@ -237,5 +250,9 @@ app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
 print("🤖 Bot is running...")
 
-# Start the bot
+# Run Flask in a separate thread so both bot and server run simultaneously
+flask_thread = Thread(target=run_flask)
+flask_thread.start()
+
+# Start Telegram bot polling (blocking call)
 app.run_polling()
