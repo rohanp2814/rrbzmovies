@@ -1,8 +1,7 @@
-import json
+import json 
 import logging
 import asyncio
 import re
-import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
@@ -27,11 +26,35 @@ RESULTS_PER_PAGE = 5
 video_index = {}
 titles = []
 
-# Normalize titles
-def normalize_title(title):
-    return re.sub(r'[\W_]+', '', title).lower()
+# Improved normalization: remove all unwanted words, not just prefixes
+UNWANTED_PREFIXES = [
+    'badshahpiratesofficial',
+    'mishrimovieshd',
+    'badshahpiratesoffical',
+    'badshahpirates',
+    'badshah',
+    'mishrimovies',
+    'mishri',
+    'pirates',
+    'official',
+    'offical',
+    'runningmovieshd'
+]
 
-# Load video index
+def normalize_title(title):
+    title = title.lower()
+    title = title.replace('_', ' ').replace('-', ' ')
+    
+    for prefix in UNWANTED_PREFIXES:
+        title = title.replace(prefix, ' ')
+    
+    title = re.sub(r'\s+', ' ', title)
+    title = re.sub(r'[^\w\s\.\-]', '', title)
+    return title.strip()
+
+
+
+
 def load_index():
     global video_index, titles
     try:
@@ -42,7 +65,6 @@ def load_index():
     except Exception as e:
         logger.error(f"Failed to load index: {e}")
 
-# Refresh and update video index from channel
 async def fetch_and_update_index():
     async with TelegramClient(SESSION_NAME, API_ID, API_HASH) as client:
         logger.info("Fetching messages from channel...")
@@ -79,7 +101,8 @@ async def fetch_and_update_index():
         logger.info(f"✅ New entries added: {new_count}")
         return new_count
 
-# Bot commands
+# --- Bot command handlers ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hi! Use /search <movie_name> to find movies.")
 
@@ -182,14 +205,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await query.message.reply_text("🔍 Want to pick another movie?", reply_markup=back_markup)
 
-# /refresh command
 async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Refreshing video index. Please wait...")
     count = await fetch_and_update_index()
     load_index()
     await update.message.reply_text(f"✅ Index refreshed! {count} new entries added.")
 
-# Extra commands
 async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
     await update.message.reply_text("✅ Index reloaded.")
@@ -197,7 +218,6 @@ async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sorry, I didn't understand that command.")
 
-# Run refresh at startup inside bot's event loop
 async def on_startup(app):
     logger.info("Starting up: refreshing index...")
     await fetch_and_update_index()
