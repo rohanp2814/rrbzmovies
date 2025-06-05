@@ -104,8 +104,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def log_not_found(query: str):
     with open(NOT_FOUND_LOG, "a", encoding="utf-8") as f:
-        f.write(f"{query}
-")
+        f.write(f"{query}\n")
 
 def get_page(matches, page):
     start = page * RESULTS_PER_PAGE
@@ -126,12 +125,10 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not matches:
         logger.info(f"Search not found: {query}")
         await log_not_found(query)
-        await update.message.reply_text(
-            "❌ Movie not found.
-"
-            "Please check the spelling and try again."
-        )
-        return
+        await update.message.reply_text("""❌ Movie not found.
+        Please check the spelling and try again.""")
+
+
 
     context.user_data['matches'] = matches
     context.user_data['page'] = 0
@@ -195,8 +192,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
         except Exception as e:
-            await query.message.reply_text(f"⚠️ Couldn't send the movie.
-{e}")
+           await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
+
         await tg_client.disconnect()
         back_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")]
