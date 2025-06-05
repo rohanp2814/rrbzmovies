@@ -42,6 +42,8 @@ UNWANTED_PREFIXES = [
     'official',
     'offical',
     'runningmovieshd'
+    '@RunningMoviesHD'
+    
 ]
 
 # Normalize titles
