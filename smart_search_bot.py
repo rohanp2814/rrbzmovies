@@ -2,9 +2,7 @@ import json
 import logging
 import asyncio
 import re
-import threading
 import os
-from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
@@ -71,11 +69,8 @@ async def fetch_and_update_index():
                 if not filename:
                     continue
                 norm_title = normalize_title(filename)
-                if norm_title not in video_index:
+                if norm_title not in video_index or video_index[norm_title] != msg.id:
                     video_index[norm_title] = msg.id
-                    new_count += 1
-                elif video_index[norm_title] != msg.id:
-                    video_index[norm_title] = msg.id  # update with latest
                     new_count += 1
 
         with open("video_index.json", "w", encoding="utf-8") as f:
@@ -127,8 +122,7 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     for title, _ in page_matches:
         text += f"• {title}\n"
 
-    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")]
-               for title, msg_id in page_matches]
+    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
 
     nav_buttons = []
     if page > 0:
@@ -223,20 +217,5 @@ app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
 print("🤖 Bot is running...")
 
-# 🧠 Minimal Flask app to keep Render alive
-flask_app = Flask(__name__)
-
-@flask_app.route('/')
-def home():
-    return "✅ Bot is alive!", 200
-
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    flask_app.run(host='0.0.0.0', port=port)
-
-# Start Flask server in background
-threading.Thread(target=run_flask).start()
-
 # Start the bot
 app.run_polling()
-
