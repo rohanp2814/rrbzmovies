@@ -36,13 +36,17 @@ UNWANTED_PREFIXES = [
 ]
 
 def normalize_title(title):
+    original = title
     title = title.lower().strip()
     for prefix in UNWANTED_PREFIXES:
         if title.startswith(prefix):
             title = title[len(prefix):].strip()
+            break  # Stop after first matched prefix
     title = re.sub(r'\s+', ' ', title)
     title = re.sub(r'[^\w\.\-_ ]', '', title)
+    logger.debug(f"normalize_title: '{original}' -> '{title}'")
     return title
+
 
 def load_index():
     global video_index, titles
@@ -82,10 +86,11 @@ async def fetch_and_update_index():
                     filename = msg.message.strip()[:100]
                 if not filename:
                     continue
-                norm_title = normalize_title(filename)
-                if norm_title and (norm_title not in current_index or current_index[norm_title] != msg.id):
-                    current_index[norm_title] = msg.id
-                    new_count += 1
+                 norm_title = normalize_title(filename)
+                 logger.info(f"Fetched filename: '{filename}' normalized to '{norm_title}'")
+                if norm_title not in current_index or current_index[norm_title] != msg.id:
+                 current_index[norm_title] = msg.id
+                 new_count += 1
 
         with open("video_index.json", "w", encoding="utf-8") as f:
             json.dump(current_index, f, indent=2, ensure_ascii=False)
