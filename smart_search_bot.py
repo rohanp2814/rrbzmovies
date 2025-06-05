@@ -19,7 +19,7 @@ BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
 CHANNEL_ID = -1002244686281
 SESSION_NAME = "anon"
 
-# Initialize clients and logging
+# Setup clients and logging
 tg_client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,18 +30,9 @@ video_index = {}
 titles = []
 
 UNWANTED_PREFIXES = [
-    'badshahpiratesofficial',
-    'mishrimovieshd',
-    'badshahpiratesoffical',
-    'badshahpirates',
-    'badshah',
-    'mishrimovies',
-    'mishri',
-    'pirates',
-    'official',
-    'offical',
-    'runningmovieshd',
-    '@RunningMoviesHD'
+    'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
+    'badshahpirates', 'badshah', 'mishrimovies', 'mishri',
+    'pirates', 'official', 'offical', 'runningmovieshd', '@RunningMoviesHD', 'runningmovieshd_'
 ]
 
 def normalize_title(title):
@@ -89,7 +80,7 @@ async def fetch_and_update_index():
                 if not filename:
                     continue
                 norm_title = normalize_title(filename)
-                if norm_title not in current_index or current_index[norm_title] != msg.id:
+                if norm_title and (norm_title not in current_index or current_index[norm_title] != msg.id):
                     current_index[norm_title] = msg.id
                     new_count += 1
 
@@ -125,10 +116,8 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not matches:
         logger.info(f"Search not found: {query}")
         await log_not_found(query)
-        await update.message.reply_text("""❌ Movie not found.
-        Please check the spelling and try again.""")
-
-
+        await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
+        return
 
     context.user_data['matches'] = matches
     context.user_data['page'] = 0
@@ -192,7 +181,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
         except Exception as e:
-           await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
+            await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
 
         await tg_client.disconnect()
         back_markup = InlineKeyboardMarkup([
@@ -240,3 +229,4 @@ print("🤖 Bot is running...")
 flask_thread = Thread(target=run_flask)
 flask_thread.start()
 app.run_polling()
+
