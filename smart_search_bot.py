@@ -51,8 +51,11 @@ def load_index():
             video_index = json.load(f)
         titles = list(video_index.keys())
         logger.info(f"Video index loaded with {len(titles)} entries.")
+        logger.info(f"Sample video_index keys: {titles[:5]}")  # Log first 5 keys to check prefixes
     except Exception as e:
         logger.error(f"Failed to load index: {e}")
+        video_index = {}
+        titles = []
 
 async def fetch_and_update_index():
     async with TelegramClient(SESSION_NAME, API_ID, API_HASH) as client:
@@ -193,7 +196,10 @@ async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Refreshing video index. Please wait...")
     count = await fetch_and_update_index()
     load_index()
+    logger.info(f"Manual refresh: {count} new entries added")
+    logger.info(f"Sample keys after refresh: {list(video_index.keys())[:5]}")
     await update.message.reply_text(f"✅ Index refreshed! {count} new entries added.")
+
 
 async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
@@ -202,11 +208,20 @@ async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sorry, I didn't understand that command.")
 
+import os
+
 async def on_startup(app):
-    logger.info("Starting up: refreshing index...")
+    logger.info("Starting up: deleting stale video_index.json if exists...")
+    if os.path.exists("video_index.json"):
+        os.remove("video_index.json")
+        logger.info("Deleted old video_index.json")
+
+    logger.info("Fetching fresh index from Telegram channel...")
     await fetch_and_update_index()
+
     load_index()
     logger.info("Startup index refresh complete.")
+
 
 flask_app = Flask(__name__)
 
