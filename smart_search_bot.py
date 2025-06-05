@@ -116,7 +116,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matches = [(title, video_index[title]) for title in titles if norm_query in normalize_title(title)]
     matches.sort(key=lambda x: x[1], reverse=True)
 
-       if not matches:
+    if not matches:
         logger.info(f"Search not found: {query}")
         await log_not_found(query)
         await update.message.reply_text(
@@ -124,6 +124,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Please check the spelling and try again."
         )
         return
+
 
 
     context.user_data['matches'] = matches
