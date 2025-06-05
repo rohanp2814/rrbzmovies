@@ -172,9 +172,8 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     total_pages = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
     page_matches = get_page(matches, page)
 
-    text = f"🎬 Select a movie (Page {page + 1} of {total_pages}):\n\n"
-    for idx, (title, _) in enumerate(page_matches, start=page*RESULTS_PER_PAGE + 1):
-        text += f"{idx}. {title}\n"
+    text = f"🎬 Select a movie (Page {page + 1} of {total_pages}):"
+
 
     buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
     pagination_buttons = create_pagination_buttons(page, total_pages)
