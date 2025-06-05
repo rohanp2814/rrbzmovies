@@ -116,12 +116,15 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matches = [(title, video_index[title]) for title in titles if norm_query in normalize_title(title)]
     matches.sort(key=lambda x: x[1], reverse=True)
 
-    if not matches:
-        suggestions = get_close_matches(norm_query, titles, n=3, cutoff=0.5)
-        suggestion_text = "\n".join(suggestions) if suggestions else "No close matches found."
+       if not matches:
+        logger.info(f"Search not found: {query}")
         await log_not_found(query)
-       await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
-       return
+        await update.message.reply_text(
+            "❌ Movie not found.\n"
+            "Please check the spelling and try again."
+        )
+        return
+
 
     context.user_data['matches'] = matches
     context.user_data['page'] = 0
