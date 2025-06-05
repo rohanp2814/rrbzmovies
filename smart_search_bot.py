@@ -41,9 +41,8 @@ UNWANTED_PREFIXES = [
     'pirates',
     'official',
     'offical',
-    'runningmovieshd'
+    'runningmovieshd',
     '@RunningMoviesHD'
-    
 ]
 
 # Normalize titles
@@ -117,6 +116,35 @@ def get_page(matches, page):
     end = start + RESULTS_PER_PAGE
     return matches[start:end]
 
+# New helper to create pagination buttons with page numbers
+def create_pagination_buttons(current_page, total_pages):
+    buttons = []
+    page_buttons = []
+
+    # Show up to 5 page buttons around current page
+    start_page = max(0, current_page - 2)
+    end_page = min(total_pages, current_page + 3)
+
+    for p in range(start_page, end_page):
+        if p == current_page:
+            # Current page: show with filled circle to indicate active
+            page_buttons.append(InlineKeyboardButton(f"⬤ {p+1}", callback_data=f"page_{p}"))
+        else:
+            page_buttons.append(InlineKeyboardButton(str(p+1), callback_data=f"page_{p}"))
+
+    buttons.append(page_buttons)
+
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page_{current_page-1}"))
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{current_page+1}"))
+
+    if nav_buttons:
+        buttons.append(nav_buttons)
+
+    return buttons
+
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
     if not context.args:
@@ -141,21 +169,16 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     matches = context.user_data.get('matches', [])
     page = context.user_data.get('page', 0)
+    total_pages = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
     page_matches = get_page(matches, page)
 
-    text = f"🎬 Select a movie (Page {page + 1}):\n\n"
-    for title, _ in page_matches:
-        text += f"• {title}\n"
+    text = f"🎬 Select a movie (Page {page + 1} of {total_pages}):\n\n"
+    for idx, (title, _) in enumerate(page_matches, start=page*RESULTS_PER_PAGE + 1):
+        text += f"{idx}. {title}\n"
 
     buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
-
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data="prev_page"))
-    if (page + 1) * RESULTS_PER_PAGE < len(matches):
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data="next_page"))
-    if nav_buttons:
-        buttons.append(nav_buttons)
+    pagination_buttons = create_pagination_buttons(page, total_pages)
+    buttons.extend(pagination_buttons)
 
     reply_markup = InlineKeyboardMarkup(buttons)
     if isinstance(update_or_query, Update):
@@ -180,14 +203,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    if data == "next_page":
-        context.user_data['page'] += 1
+    if data.startswith("page_"):
+        page_num = int(data.split("_")[1])
+        context.user_data['page'] = page_num
         await send_results(query, context)
-    elif data == "prev_page":
-        context.user_data['page'] -= 1
-        await send_results(query, context)
-    elif data == "back_to_results":
-        await send_results(query, context)
+
     elif data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
         await query.edit_message_text("🎬 Sending your movie...")
@@ -202,10 +222,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
         await tg_client.disconnect()
-        back_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")]
-        ])
+        back_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")
+        ]])
         await query.message.reply_text("🔍 Want to pick another movie?", reply_markup=back_markup)
+
+    elif data == "back_to_results":
+        await send_results(query, context)
+
+    else:
+        # fallback for legacy next/prev (optional)
+        if data == "next_page":
+            context.user_data['page'] += 1
+            await send_results(query, context)
+        elif data == "prev_page":
+            context.user_data['page'] -= 1
+            await send_results(query, context)
 
 # /refresh command
 async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
