@@ -1,13 +1,11 @@
-import json 
+import json
 import logging
 import asyncio
 import re
 from threading import Thread
-from difflib import get_close_matches
 
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ChatAction
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
@@ -21,6 +19,7 @@ BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
 CHANNEL_ID = -1002244686281
 SESSION_NAME = "anon"
 
+# Initialize clients and logging
 tg_client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,9 +30,18 @@ video_index = {}
 titles = []
 
 UNWANTED_PREFIXES = [
-    'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
-    'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'pirates',
-    'official', 'offical', 'runningmovieshd', '@RunningMoviesHD'
+    'badshahpiratesofficial',
+    'mishrimovieshd',
+    'badshahpiratesoffical',
+    'badshahpirates',
+    'badshah',
+    'mishrimovies',
+    'mishri',
+    'pirates',
+    'official',
+    'offical',
+    'runningmovieshd',
+    '@RunningMoviesHD'
 ]
 
 def normalize_title(title):
@@ -59,6 +67,7 @@ async def fetch_and_update_index():
     async with TelegramClient(SESSION_NAME, API_ID, API_HASH) as client:
         logger.info("Fetching messages from channel...")
         messages = await client.get_messages(CHANNEL_ID, limit=5000)
+
         try:
             with open("video_index.json", "r", encoding="utf-8") as f:
                 current_index = json.load(f)
@@ -95,15 +104,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def log_not_found(query: str):
     with open(NOT_FOUND_LOG, "a", encoding="utf-8") as f:
-        f.write(f"{query}\n")
+        f.write(f"{query}
+")
 
 def get_page(matches, page):
     start = page * RESULTS_PER_PAGE
     end = start + RESULTS_PER_PAGE
     return matches[start:end]
-
-async def send_typing(context, chat_id):
-    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
@@ -120,12 +127,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Search not found: {query}")
         await log_not_found(query)
         await update.message.reply_text(
-            "❌ Movie not found.\n"
+            "❌ Movie not found.
+"
             "Please check the spelling and try again."
         )
         return
-
-
 
     context.user_data['matches'] = matches
     context.user_data['page'] = 0
@@ -136,15 +142,7 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     page = context.user_data.get('page', 0)
     page_matches = get_page(matches, page)
 
-    text = f"🎬 Page {page + 1} Results:
-
-"
-    for title, _ in page_matches:
-        text += f"• {title.title()}
-"
-
-    buttons = [[InlineKeyboardButton(f"🎬 {title.title()[:50]}", callback_data=f"movie_{msg_id}")]
-               for title, msg_id in page_matches]
+    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
 
     nav_buttons = []
     if page > 0:
@@ -156,10 +154,9 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = InlineKeyboardMarkup(buttons)
     if isinstance(update_or_query, Update):
-        await send_typing(context, update_or_query.effective_chat.id)
-        await update_or_query.message.reply_text(text, reply_markup=reply_markup)
+        await update_or_query.message.reply_text("🎬 Select a movie:", reply_markup=reply_markup)
     else:
-        await update_or_query.edit_message_text(text, reply_markup=reply_markup)
+        await update_or_query.edit_message_text("🎬 Select a movie:", reply_markup=reply_markup)
 
 async def delete_message_after(chat_id: int, message_id: int, context: ContextTypes.DEFAULT_TYPE):
     await asyncio.sleep(55 * 60)
@@ -198,7 +195,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
         except Exception as e:
-            await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
+            await query.message.reply_text(f"⚠️ Couldn't send the movie.
+{e}")
         await tg_client.disconnect()
         back_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")]
@@ -225,6 +223,7 @@ async def on_startup(app):
     logger.info("Startup index refresh complete.")
 
 flask_app = Flask(__name__)
+
 @flask_app.route("/")
 def home():
     return "Bot is running"
@@ -241,7 +240,6 @@ app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
 print("🤖 Bot is running...")
-
 flask_thread = Thread(target=run_flask)
 flask_thread.start()
 app.run_polling()
