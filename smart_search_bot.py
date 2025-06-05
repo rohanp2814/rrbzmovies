@@ -95,8 +95,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def log_not_found(query: str):
     with open(NOT_FOUND_LOG, "a", encoding="utf-8") as f:
-        f.write(f"{query}
-")
+        f.write(f"{query}\n")
 
 def get_page(matches, page):
     start = page * RESULTS_PER_PAGE
