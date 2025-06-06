@@ -1,3 +1,4 @@
+
 import json
 import logging
 import asyncio
@@ -31,21 +32,43 @@ titles = []
 
 UNWANTED_PREFIXES = [
     'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
-    'badshahpirates', 'badshah', 'mishrimovies', 'mishri',
-    'pirates', 'official', 'offical', 'runningmovieshd', '@RunningMoviesHD', 'runningmovieshd_'
+    'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'clipmateempire',
+    'ap_files', 'runningmovieshd', '@RunningMoviesHD', 'runningmovieshd_',
+    'runningmovieshd -', 'clipmateempire -', 'ap files','ap_files -'
 ]
+
+
 
 def normalize_title(title):
     original = title
     title = title.lower().strip()
+
+    # Replace common separators
+    title = title.replace("_", " ").replace("-", " ").replace(".", " ")
+    
+    # Remove unwanted words regardless of position
     for prefix in UNWANTED_PREFIXES:
-        if title.startswith(prefix):
-            title = title[len(prefix):].strip()
-            break  # Stop after first matched prefix
-    title = re.sub(r'\s+', ' ', title)
-    title = re.sub(r'[^\w\.\-_ ]', '', title)
+        pattern = re.compile(re.escape(prefix), re.IGNORECASE)
+        title = pattern.sub('', title)
+    
+    # Remove extra spaces and special characters
+    title = re.sub(r'\s+', ' ', title)  # Collapse spaces
+    title = re.sub(r'[^\w\s]', '', title)  # Remove non-word characters
+    title = title.strip()
+    
     logger.debug(f"normalize_title: '{original}' -> '{title}'")
     return title
+
+
+    # Cleanup leftover junk
+    title = re.sub(r'\s+', ' ', title)
+    title = re.sub(r'[^\w\.\-_ ]', '', title)
+    title = title.strip()
+
+    logger.debug(f"normalize_title: '{original}' -> '{title}'")
+    return title
+
+
 
 
 def load_index():
@@ -86,11 +109,14 @@ async def fetch_and_update_index():
                     filename = msg.message.strip()[:100]
                 if not filename:
                     continue
-                 norm_title = normalize_title(filename)
-                 logger.info(f"Fetched filename: '{filename}' normalized to '{norm_title}'")
+                norm_title = normalize_title(filename)
+                logger.info(f"Fetched filename: '{filename}' normalized to '{norm_title}'")
+
                 if norm_title not in current_index or current_index[norm_title] != msg.id:
-                 current_index[norm_title] = msg.id
-                 new_count += 1
+                    current_index[norm_title] = msg.id
+                    new_count += 1
+
+
 
         with open("video_index.json", "w", encoding="utf-8") as f:
             json.dump(current_index, f, indent=2, ensure_ascii=False)
@@ -249,4 +275,3 @@ print("🤖 Bot is running...")
 flask_thread = Thread(target=run_flask)
 flask_thread.start()
 app.run_polling()
-
