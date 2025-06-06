@@ -123,8 +123,18 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Search not found: {query}")
         await log_not_found(query)
 
-        suggestions = process.extract(norm_query, titles, limit=5, scorer=fuzz.ratio)
-        suggestion_text = "\n".join([f"🔹 {s[0]}" for s in suggestions if s[1] > 50])
+        matches_scored = process.extract(
+    norm_query,
+    titles,
+    scorer=fuzz.token_sort_ratio,
+    limit=5
+)
+
+suggestion_text = "\n".join([
+    f"🔹 {original}" for norm, score in matches_scored if score > 50
+    for original in video_index.keys() if normalize_title(original) == norm
+])
+
         if suggestion_text:
             await update.message.reply_text(
                 f"❌ Movie not found.\nDid you mean:\n{suggestion_text}"
