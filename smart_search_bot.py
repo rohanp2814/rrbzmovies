@@ -1,10 +1,8 @@
-
 import json
 import logging
 import asyncio
 import re
 from threading import Thread
-
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -12,15 +10,15 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters
 )
 from telethon.sync import TelegramClient
+from rapidfuzz import process
 
-# Telegram API credentials
+# Telegram credentials
 API_ID = '26611044'
 API_HASH = '9ef2ceed3bd6ac525020d757980f6864'
 BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
 CHANNEL_ID = -1002244686281
 SESSION_NAME = "anon"
 
-# Setup clients and logging
 tg_client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,49 +32,22 @@ UNWANTED_PREFIXES = [
     'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
     'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'clipmateempire',
     'ap_files', 'runningmovieshd', '@runningmovieshd', 'filmygod', 'hindiwebseries',
-    'moviesverse', 'moviezverse', 'sflix', 'primevideo','clipmatemovies'
+    'moviesverse', 'moviezverse', 'sflix', 'primevideo', 'clipmatemovies'
 ]
-
-
-
 
 def normalize_title(title):
     original = title
     title = title.lower().strip()
-
-    # Remove Telegram-style tags like [@BadshahPiratesOfficial]
     title = re.sub(r'\[@[^]]+\]', '', title)
-
-    # Remove any other bracketed content like (HDMovies)
     title = re.sub(r'\([^)]*\)', '', title)
-
-    # Replace common separators with space
     title = title.replace("_", " ").replace("-", " ").replace(".", " ")
-
-    # Remove unwanted branding words
     for word in UNWANTED_PREFIXES:
         title = re.sub(re.escape(word), '', title, flags=re.IGNORECASE)
-
-    # Clean up extra whitespace and leftover symbols
     title = re.sub(r'\s+', ' ', title)
     title = re.sub(r'[^\w\s]', '', title)
     title = title.strip()
-
     logger.debug(f"normalize_title: '{original}' -> '{title}'")
     return title
-
-
-
-    # Cleanup leftover junk
-    title = re.sub(r'\s+', ' ', title)
-    title = re.sub(r'[^\w\.\-_ ]', '', title)
-    title = title.strip()
-
-    logger.debug(f"normalize_title: '{original}' -> '{title}'")
-    return title
-
-
-
 
 def load_index():
     global video_index, titles
@@ -85,7 +56,6 @@ def load_index():
             video_index = json.load(f)
         titles = list(video_index.keys())
         logger.info(f"Video index loaded with {len(titles)} entries.")
-        logger.info(f"Sample video_index keys: {titles[:5]}")  # Log first 5 keys to check prefixes
     except Exception as e:
         logger.error(f"Failed to load index: {e}")
         video_index = {}
@@ -117,13 +87,9 @@ async def fetch_and_update_index():
                 if not filename:
                     continue
                 norm_title = normalize_title(filename)
-                logger.info(f"Fetched filename: '{filename}' normalized to '{norm_title}'")
-
                 if norm_title not in current_index or current_index[norm_title] != msg.id:
                     current_index[norm_title] = msg.id
                     new_count += 1
-
-
 
         with open("video_index.json", "w", encoding="utf-8") as f:
             json.dump(current_index, f, indent=2, ensure_ascii=False)
@@ -157,7 +123,20 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not matches:
         logger.info(f"Search not found: {query}")
         await log_not_found(query)
-        await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
+
+        # Fuzzy suggestions using rapidfuzz
+        suggestions = process.extract(norm_query, titles, limit=5, scorer=process.fuzz.ratio)
+        suggestion_buttons = [
+            [InlineKeyboardButton(text=s[0][:50], callback_data=f"suggest_{s[0]}")] for s in suggestions if s[1] > 60
+        ]
+
+        if suggestion_buttons:
+            await update.message.reply_text(
+                "❌ Movie not found.\nDid you mean one of these?",
+                reply_markup=InlineKeyboardMarkup(suggestion_buttons)
+            )
+        else:
+            await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
         return
 
     context.user_data['matches'] = matches
@@ -169,9 +148,9 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     page = context.user_data.get('page', 0)
     page_matches = get_page(matches, page)
 
-    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
-
+    buttons = [[InlineKeyboardButton(f"🎬 {title[:50]}", callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
     nav_buttons = []
+
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data="prev_page"))
     if (page + 1) * RESULTS_PER_PAGE < len(matches):
@@ -181,9 +160,9 @@ async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = InlineKeyboardMarkup(buttons)
     if isinstance(update_or_query, Update):
-        await update_or_query.message.reply_text("🎬 Select a movie:", reply_markup=reply_markup)
+        await update_or_query.message.reply_text("🎥 Select a movie from the list below:", reply_markup=reply_markup)
     else:
-        await update_or_query.edit_message_text("🎬 Select a movie:", reply_markup=reply_markup)
+        await update_or_query.edit_message_text("🎥 Select a movie from the list below:", reply_markup=reply_markup)
 
 async def delete_message_after(chat_id: int, message_id: int, context: ContextTypes.DEFAULT_TYPE):
     await asyncio.sleep(55 * 60)
@@ -208,8 +187,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "prev_page":
         context.user_data['page'] -= 1
         await send_results(query, context)
-    elif data == "back_to_results":
-        await send_results(query, context)
+    elif data.startswith("suggest_"):
+        suggested_title = data.replace("suggest_", "")
+        msg_id = video_index.get(suggested_title)
+        if msg_id:
+            await query.edit_message_text("🎬 Sending your movie...")
+            await tg_client.start()
+            try:
+                sent = await context.bot.forward_message(
+                    chat_id=query.message.chat_id,
+                    from_chat_id=CHANNEL_ID,
+                    message_id=msg_id
+                )
+                context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
+            except Exception as e:
+                await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
+            await tg_client.disconnect()
+        else:
+            await query.message.reply_text("❌ Could not locate the suggested movie.")
     elif data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
         await query.edit_message_text("🎬 Sending your movie...")
@@ -223,46 +218,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
         except Exception as e:
             await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
-
         await tg_client.disconnect()
         back_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")]
+            [InlineKeyboardButton("🔍 Back to results", callback_data="back_to_results")]
         ])
-        await query.message.reply_text("🔍 Want to pick another movie?", reply_markup=back_markup)
+        await query.message.reply_text("📥 Want another movie?", reply_markup=back_markup)
+    elif data == "back_to_results":
+        await send_results(query, context)
 
 async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Refreshing video index. Please wait...")
     count = await fetch_and_update_index()
     load_index()
-    logger.info(f"Manual refresh: {count} new entries added")
-    logger.info(f"Sample keys after refresh: {list(video_index.keys())[:5]}")
     await update.message.reply_text(f"✅ Index refreshed! {count} new entries added.")
-
 
 async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_index()
     await update.message.reply_text("✅ Index reloaded.")
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Sorry, I didn't understand that command.")
+    await update.message.reply_text("❓ Unknown command. Use /search <name> to find a movie.")
 
 import os
-
 async def on_startup(app):
     logger.info("Starting up: deleting stale video_index.json if exists...")
     if os.path.exists("video_index.json"):
         os.remove("video_index.json")
         logger.info("Deleted old video_index.json")
-
-    logger.info("Fetching fresh index from Telegram channel...")
     await fetch_and_update_index()
-
     load_index()
     logger.info("Startup index refresh complete.")
 
-
 flask_app = Flask(__name__)
-
 @flask_app.route("/")
 def home():
     return "Bot is running"
