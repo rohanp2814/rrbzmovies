@@ -34,7 +34,7 @@ UNWANTED_PREFIXES = [
     'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
     'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'clipmateempire',
     'ap_files', 'runningmovieshd', '@RunningMoviesHD', 'runningmovieshd_',
-    'runningmovieshd -', 'clipmateempire -', 'ap files','ap_files -'
+    'runningmovieshd -', 'clipmateempire -', 'ap files','ap_files -','clipmatemovies'
 ]
 
 
