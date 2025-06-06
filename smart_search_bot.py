@@ -1,3 +1,4 @@
+
 import json
 import logging
 import asyncio
@@ -109,39 +110,51 @@ def get_page(matches, page):
     return matches[start:end]
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    load_index()
+    
     if not context.args:
         await update.message.reply_text("Please provide a search query, e.g. /search raid")
         return
 
     query = " ".join(context.args).strip()
     norm_query = normalize_title(query)
+
+    # Direct match first
     matches = [(title, video_index[title]) for title in titles if norm_query in normalize_title(title)]
     matches.sort(key=lambda x: x[1], reverse=True)
 
-    if not matches:
-        logger.info(f"Search not found: {query}")
-        await log_not_found(query)
+    if matches:
+        context.user_data['matches'] = matches
+        context.user_data['page'] = 0
+        await send_results(update, context)
+        return
 
+    # No matches found, log it
+    logger.info(f"Search not found: {query}")
+    await log_not_found(query)
+
+    # Fuzzy search suggestions
     matches_scored = process.extract(
-      norm_query,
-      titles,
-      scorer=fuzz.token_sort_ratio,
-      limit=5
+        norm_query,
+        titles,
+        scorer=fuzz.token_set_ratio,
+        limit=5
     )
 
-    suggestion_text = "\n".join([
-    f"🔹 {original}" for norm, score in matches_scored if score > 50
-    for original in video_index.keys() if normalize_title(original) == norm
-    ])
+    suggestions = []
+    for match_title, score, _ in matches_scored:
+        if score >= 40:
+            suggestions.append(f"🔹 {match_title}")
 
-        if suggestion_text:
-            await update.message.reply_text(
-                f"❌ Movie not found.\nDid you mean:\n{suggestion_text}"
-            )
-        else:
-            await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
-        return
+    if suggestions:
+        suggestion_text = "\n".join(suggestions)
+        await update.message.reply_text(f"❌ Movie not found.\nDid you mean:\n{suggestion_text}")
+    else:
+        await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
+        
+
+    return
+
+    
 
     context.user_data['matches'] = matches
     context.user_data['page'] = 0
