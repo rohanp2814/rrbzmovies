@@ -33,9 +33,10 @@ titles = []
 UNWANTED_PREFIXES = [
     'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
     'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'clipmateempire',
-    'ap_files', 'runningmovieshd', '@RunningMoviesHD', 'runningmovieshd_',
-    'runningmovieshd -', 'clipmateempire -', 'ap files','ap_files -','clipmatemovies'
+    'ap_files', 'runningmovieshd', '@runningmovieshd', 'filmygod', 'hindiwebseries',
+    'moviesverse', 'moviezverse', 'sflix', 'primevideo','clipmatemovies'
 ]
+
 
 
 
@@ -43,21 +44,27 @@ def normalize_title(title):
     original = title
     title = title.lower().strip()
 
-    # Replace common separators
+    # Remove Telegram-style tags like [@BadshahPiratesOfficial]
+    title = re.sub(r'\[@[^]]+\]', '', title)
+
+    # Remove any other bracketed content like (HDMovies)
+    title = re.sub(r'\([^)]*\)', '', title)
+
+    # Replace common separators with space
     title = title.replace("_", " ").replace("-", " ").replace(".", " ")
-    
-    # Remove unwanted words regardless of position
-    for prefix in UNWANTED_PREFIXES:
-        pattern = re.compile(re.escape(prefix), re.IGNORECASE)
-        title = pattern.sub('', title)
-    
-    # Remove extra spaces and special characters
-    title = re.sub(r'\s+', ' ', title)  # Collapse spaces
-    title = re.sub(r'[^\w\s]', '', title)  # Remove non-word characters
+
+    # Remove unwanted branding words
+    for word in UNWANTED_PREFIXES:
+        title = re.sub(re.escape(word), '', title, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace and leftover symbols
+    title = re.sub(r'\s+', ' ', title)
+    title = re.sub(r'[^\w\s]', '', title)
     title = title.strip()
-    
+
     logger.debug(f"normalize_title: '{original}' -> '{title}'")
     return title
+
 
 
     # Cleanup leftover junk
