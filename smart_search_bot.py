@@ -3,6 +3,7 @@ import logging
 import asyncio
 import re
 from threading import Thread
+import os
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -12,8 +13,6 @@ from telegram.ext import (
 from telethon.sync import TelegramClient
 from rapidfuzz import process, fuzz
 
-
-# Telegram credentials
 API_ID = '26611044'
 API_HASH = '9ef2ceed3bd6ac525020d757980f6864'
 BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
@@ -33,7 +32,7 @@ UNWANTED_PREFIXES = [
     'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
     'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'clipmateempire',
     'ap_files', 'runningmovieshd', '@runningmovieshd', 'filmygod', 'hindiwebseries',
-    'moviesverse', 'moviezverse', 'sflix', 'primevideo', 'clipmatemovies'
+    'moviesverse', 'moviezverse', 'sflix', 'primevideo','clipmatemovies'
 ]
 
 def normalize_title(title):
@@ -74,7 +73,6 @@ async def fetch_and_update_index():
             current_index = {}
 
         new_count = 0
-
         for msg in messages:
             if msg.video or msg.document:
                 filename = None
@@ -125,17 +123,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Search not found: {query}")
         await log_not_found(query)
 
-        # Fuzzy suggestions using rapidfuzz
         suggestions = process.extract(norm_query, titles, limit=5, scorer=fuzz.ratio)
-
-        suggestion_buttons = [
-            [InlineKeyboardButton(text=s[0][:50], callback_data=f"suggest_{s[0]}")] for s in suggestions if s[1] > 60
-        ]
-
-        if suggestion_buttons:
+        suggestion_text = "\n".join([f"🔹 {s[0]}" for s in suggestions if s[1] > 50])
+        if suggestion_text:
             await update.message.reply_text(
-                "❌ Movie not found.\nDid you mean one of these?",
-                reply_markup=InlineKeyboardMarkup(suggestion_buttons)
+                f"❌ Movie not found.\nDid you mean:\n{suggestion_text}"
             )
         else:
             await update.message.reply_text("❌ Movie not found.\nPlease check the spelling and try again.")
@@ -148,23 +140,30 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_results(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     matches = context.user_data.get('matches', [])
     page = context.user_data.get('page', 0)
+    total_pages = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
     page_matches = get_page(matches, page)
 
-    buttons = [[InlineKeyboardButton(f"🎬 {title[:50]}", callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
-    nav_buttons = []
+    buttons = [[InlineKeyboardButton(text=title[:60], callback_data=f"movie_{msg_id}")] for title, msg_id in page_matches]
 
+    nav_buttons = []
     if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⏮ First", callback_data="first_page"))
         nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data="prev_page"))
     if (page + 1) * RESULTS_PER_PAGE < len(matches):
         nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data="next_page"))
+        nav_buttons.append(InlineKeyboardButton("⏭ Last", callback_data="last_page"))
+
     if nav_buttons:
         buttons.append(nav_buttons)
 
+    buttons.append([InlineKeyboardButton("🔢 Jump to Page", callback_data="jump_page")])
+
     reply_markup = InlineKeyboardMarkup(buttons)
+    text = f"📄 Page {page + 1} of {total_pages} – Select a movie:"
     if isinstance(update_or_query, Update):
-        await update_or_query.message.reply_text("🎥 Select a movie from the list below:", reply_markup=reply_markup)
+        await update_or_query.message.reply_text(text, reply_markup=reply_markup)
     else:
-        await update_or_query.edit_message_text("🎥 Select a movie from the list below:", reply_markup=reply_markup)
+        await update_or_query.edit_message_text(text, reply_markup=reply_markup)
 
 async def delete_message_after(chat_id: int, message_id: int, context: ContextTypes.DEFAULT_TYPE):
     await asyncio.sleep(55 * 60)
@@ -189,24 +188,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "prev_page":
         context.user_data['page'] -= 1
         await send_results(query, context)
-    elif data.startswith("suggest_"):
-        suggested_title = data.replace("suggest_", "")
-        msg_id = video_index.get(suggested_title)
-        if msg_id:
-            await query.edit_message_text("🎬 Sending your movie...")
-            await tg_client.start()
-            try:
-                sent = await context.bot.forward_message(
-                    chat_id=query.message.chat_id,
-                    from_chat_id=CHANNEL_ID,
-                    message_id=msg_id
-                )
-                context.application.create_task(delete_message_after(sent.chat.id, sent.message_id, context))
-            except Exception as e:
-                await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
-            await tg_client.disconnect()
-        else:
-            await query.message.reply_text("❌ Could not locate the suggested movie.")
+    elif data == "first_page":
+        context.user_data['page'] = 0
+        await send_results(query, context)
+    elif data == "last_page":
+        matches = context.user_data.get('matches', [])
+        context.user_data['page'] = (len(matches) - 1) // RESULTS_PER_PAGE
+        await send_results(query, context)
+    elif data == "jump_page":
+        await query.edit_message_text("🔢 Send the page number you want to jump to.")
+        context.user_data['awaiting_page_input'] = True
+    elif data == "back_to_results":
+        await send_results(query, context)
     elif data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
         await query.edit_message_text("🎬 Sending your movie...")
@@ -222,11 +215,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(f"⚠️ Couldn't send the movie.\n{e}")
         await tg_client.disconnect()
         back_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔍 Back to results", callback_data="back_to_results")]
+            [InlineKeyboardButton("🔙 Back to results", callback_data="back_to_results")]
         ])
-        await query.message.reply_text("📥 Want another movie?", reply_markup=back_markup)
-    elif data == "back_to_results":
-        await send_results(query, context)
+        await query.message.reply_text("🔍 Want to pick another movie?", reply_markup=back_markup)
+
+async def handle_page_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("awaiting_page_input"):
+        text = update.message.text.strip()
+        if not text.isdigit():
+            await update.message.reply_text("❌ Please enter a valid page number.")
+            return
+        page_number = int(text) - 1
+        matches = context.user_data.get('matches', [])
+        total_pages = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
+        if 0 <= page_number < total_pages:
+            context.user_data["page"] = page_number
+            context.user_data["awaiting_page_input"] = False
+            await send_results(update, context)
+        else:
+            await update.message.reply_text(f"❌ Page must be between 1 and {total_pages}.")
 
 async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Refreshing video index. Please wait...")
@@ -239,19 +246,17 @@ async def reloadindex_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("✅ Index reloaded.")
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❓ Unknown command. Use /search <name> to find a movie.")
+    await update.message.reply_text("Sorry, I didn't understand that command.")
 
-import os
 async def on_startup(app):
-    logger.info("Starting up: deleting stale video_index.json if exists...")
+    logger.info("Starting up...")
     if os.path.exists("video_index.json"):
         os.remove("video_index.json")
-        logger.info("Deleted old video_index.json")
     await fetch_and_update_index()
     load_index()
-    logger.info("Startup index refresh complete.")
 
 flask_app = Flask(__name__)
+
 @flask_app.route("/")
 def home():
     return "Bot is running"
@@ -265,6 +270,7 @@ app.add_handler(CommandHandler('search', search_command))
 app.add_handler(CommandHandler('reloadindex', reloadindex_command))
 app.add_handler(CommandHandler('refresh', refresh_command))
 app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_page_input))
 app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
 print("🤖 Bot is running...")
