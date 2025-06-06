@@ -1,4 +1,5 @@
-﻿Flask
+rapidfuzz
+Flask
 python-telegram-bot==20.7
 httpx==0.25.2
 APScheduler==3.10.4
