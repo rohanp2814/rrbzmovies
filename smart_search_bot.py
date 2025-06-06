@@ -10,7 +10,8 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters
 )
 from telethon.sync import TelegramClient
-from rapidfuzz import process
+from rapidfuzz import process, fuzz
+
 
 # Telegram credentials
 API_ID = '26611044'
@@ -125,7 +126,8 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await log_not_found(query)
 
         # Fuzzy suggestions using rapidfuzz
-        suggestions = process.extract(norm_query, titles, limit=5, scorer=process.fuzz.ratio)
+        suggestions = process.extract(norm_query, titles, limit=5, scorer=fuzz.ratio)
+
         suggestion_buttons = [
             [InlineKeyboardButton(text=s[0][:50], callback_data=f"suggest_{s[0]}")] for s in suggestions if s[1] > 60
         ]
