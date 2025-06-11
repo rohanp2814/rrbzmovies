@@ -14,7 +14,6 @@ from session_string import SESSION
 # --- Config ---
 API_ID = 26611044
 API_HASH = "9ef2ceed3bd6ac525020d757980f6864"
-BOT_TOKEN = "ef2ceed3bd6ac525020d757980f6864"
 BOT_TOKEN = "8126440223:AAHrzJZ_ymHplsQ3n99kJH09UQjuq1n6UP4"
 CHANNEL_ID = -1002244686281
 ADMIN_ID = 1162354049
@@ -29,9 +28,11 @@ video_index = {}
 titles = []
 RESULTS_PER_PAGE = 5
 UNWANTED_PREFIXES = [
-    'badshahpiratesofficial', 'mishrimovieshd', 'clipmateempire',
-    'ap_files', 'runningmovieshd', 'filmygod', 'hindiwebseries',
-    'moviesverse', 'moviezverse', 'sflix', 'primevideo'
+    'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
+    'badshahpirates', 'badshah', 'mishrimovies', 'mishri',
+    'clipmateempire', 'ap_files', 'runningmovieshd', 'filmygod',
+    'hindiwebseries', 'moviesverse', 'moviezverse', 'sflix',
+    'primevideo', 'clipmatemovies'
 ]
 
 # --- Helpers ---
@@ -55,7 +56,6 @@ def load_index():
         titles.clear()
 
 async def fetch_and_update_index():
-    await tg_client.connect()
     messages = await tg_client.get_messages(CHANNEL_ID, limit=15000)
     current = {}
     added = 0
@@ -77,29 +77,33 @@ async def fetch_and_update_index():
                 added += 1
     with open("video_index.json", "w", encoding="utf-8") as f:
         json.dump(current, f, indent=2, ensure_ascii=False)
-    await tg_client.disconnect()
     logger.info(f"📦 Indexed {added} new videos")
     return added
 
-# --- Bot UI ---
+# --- Telegram Bot Handlers ---
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    msg = (
-        "👋 *Welcome to MovieBot!*\n\n"
-        "Use /search <movie name> to find something.\n"
-        "Use /refresh to update the index."
-    )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text("👋 *Welcome to MovieBot!*\nUse /search <name> to find your movie.", parse_mode='Markdown')
 
 async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         return await update.message.reply_text("❗ Use: /search <movie name>")
     q = normalize_title(" ".join(ctx.args))
-    results = process.extract(q, titles, scorer=fuzz.token_set_ratio, limit=20)
+    results = process.extract(q, titles, scorer=fuzz.token_sort_ratio, limit=20)
     matches = [(title, video_index[title]) for title, score, _ in results if score > 55]
+
     if not matches:
-        suggestions = process.extract(q, titles, scorer=fuzz.partial_ratio, limit=3)
-        text = "❌ Not found. Suggestions:\n" + "\n".join(f"👉 /search {s[0]}" for s in suggestions)
-        return await update.message.reply_text(text)
+        # Suggestions
+        suggestions = [(title, score) for title, score, _ in results if 30 < score <= 55][:5]
+        if suggestions:
+            buttons = [
+                [InlineKeyboardButton(f"🔍 {title.title()} ({score}%)", callback_data=f"suggest_{title}")]
+                for title, score in suggestions
+            ]
+            await update.message.reply_text("❌ No exact matches. Try one of these:", reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await update.message.reply_text("❌ No matches found.")
+        return
+
     ctx.user_data["matches"], ctx.user_data["page"] = matches, 0
     await show_page(update, ctx)
 
@@ -109,6 +113,7 @@ async def show_page(update_or_cb, ctx):
     total = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
     items = matches[page*RESULTS_PER_PAGE:(page+1)*RESULTS_PER_PAGE]
     buttons = [[InlineKeyboardButton(t[:60], callback_data=f"movie_{mid}")] for t, mid in items]
+
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton("⬅️ Prev", callback_data="prev"))
@@ -116,6 +121,7 @@ async def show_page(update_or_cb, ctx):
         nav.append(InlineKeyboardButton("Next ➡️", callback_data="next"))
     if nav:
         buttons.append(nav)
+
     buttons.append([InlineKeyboardButton("🔢 Jump", callback_data="jump")])
     kb = InlineKeyboardMarkup(buttons)
     msg = f"📄 Page {page+1}/{total} — Select a movie:"
@@ -128,15 +134,20 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cb = update.callback_query
     await cb.answer()
     data = cb.data
+
+    if data.startswith("suggest_"):
+        query = data.split("_", 1)[1]
+        update.message = cb.message
+        ctx.args = [query]
+        return await search(update, ctx)
+
     if data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
         await cb.edit_message_text("🎬 Sending...")
-        await tg_client.start()
         try:
             await ctx.bot.forward_message(cb.message.chat.id, CHANNEL_ID, msg_id)
         except Exception as e:
             return await cb.message.reply_text(f"⚠️ {e}")
-        await tg_client.disconnect()
         return await cb.message.reply_text("✅ Sent. Back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back")]]))
 
     page = ctx.user_data.get("page", 0)
@@ -149,6 +160,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await cb.edit_message_text("🔢 Send page number:")
     elif data == "back":
         return await show_page(cb, ctx)
+
     await show_page(cb, ctx)
 
 async def jump(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -184,11 +196,12 @@ async def reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def unknown(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❓ Unknown command. Try /search or /refresh")
 
-# --- Flask ---
+# --- Flask Keep-Alive ---
 flask = Flask("")
+
 @flask.route("/")
 def home():
-    return "🤖 Bot is live"
+    return "🤖 Bot running"
 
 def run_flask():
     flask.run("0.0.0.0", 8080)
@@ -197,11 +210,13 @@ def run_flask():
 async def on_startup(app):
     await tg_client.connect()
     me = await tg_client.get_me()
-    logger.info(f"✅ Logged in as: {me.username or me.first_name}")
+    print(f"✅ Logged in as: {me.username or me.first_name}")
+
     if not os.path.exists("video_index.json"):
         await fetch_and_update_index()
     load_index()
 
+# --- Main ---
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler("start", start))
