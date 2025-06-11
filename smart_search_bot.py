@@ -80,11 +80,11 @@ async def fetch_and_update_index():
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 *Welcome to MovieBot!*
+        "👋 *Welcome to MovieBot!*"
 
-"
-        "🎬 Use /search <movie name> to find your favorite films
-"
+
+        "🎬 Use /search <movie name> to find your favorite films"
+
         "🔄 Use /refresh to sync latest uploads",
         parse_mode="Markdown"
     )
