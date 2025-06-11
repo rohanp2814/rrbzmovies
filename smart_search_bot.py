@@ -40,7 +40,7 @@ def normalize_title(t):
     t = t.lower()
     t = re.sub(r'[@\[\](){}<>._\-]', ' ', t)
     for pref in UNWANTED_PREFIXES:
-        t = re.sub(re.escape(pref), ' ', t, flags=re.IGNORECASE)
+        t = re.sub(rf"\\b{re.escape(pref)}\\b", ' ', t, flags=re.IGNORECASE)
     t = re.sub(r'\s+', ' ', t)
     return t.strip()
 
