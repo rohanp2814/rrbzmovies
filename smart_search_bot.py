@@ -92,11 +92,10 @@ async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     matches = [(title, video_index[title]) for title, score, _ in results if score > 55]
 
     if not matches:
-        # Suggestions
         suggestions = [(title, score) for title, score, _ in results if 30 < score <= 55][:5]
         if suggestions:
             buttons = [
-                [InlineKeyboardButton(f"🔍 {title.title()} ({score}%)", callback_data=f"suggest_{title}")]
+                [InlineKeyboardButton(f"🔍 {title.title()} ({score}%)", callback_data=f"suggest::{title}")]
                 for title, score in suggestions
             ]
             await update.message.reply_text("❌ No exact matches. Try one of these:", reply_markup=InlineKeyboardMarkup(buttons))
@@ -116,13 +115,15 @@ async def show_page(update_or_cb, ctx):
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data="prev"))
+        nav.append(InlineKeyboardButton("⏮ First", callback_data="first"))
+        nav.append(InlineKeyboardButton("⬅ Prev", callback_data="prev"))
     if page < total - 1:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data="next"))
+        nav.append(InlineKeyboardButton("Next ➡", callback_data="next"))
+        nav.append(InlineKeyboardButton("Last ⏭", callback_data="last"))
     if nav:
         buttons.append(nav)
 
-    buttons.append([InlineKeyboardButton("🔢 Jump", callback_data="jump")])
+    buttons.append([InlineKeyboardButton("🔢 Jump to Page", callback_data="jump")])
     kb = InlineKeyboardMarkup(buttons)
     msg = f"📄 Page {page+1}/{total} — Select a movie:"
     if isinstance(update_or_cb, Update):
@@ -135,14 +136,14 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cb.answer()
     data = cb.data
 
-    if data.startswith("suggest_"):
-        query = data.split("_", 1)[1]
-        update.message = cb.message
+    if data.startswith("suggest::"):
+        query = data.split("::", 1)[1]
         ctx.args = [query]
-        return await search(update, ctx)
+        fake_update = Update(update.update_id, message=cb.message)
+        return await search(fake_update, ctx)
 
     if data.startswith("movie_"):
-        msg_id = int(data.split("_")[1])
+        msg_id = int(data.split("_", 1)[1])
         await cb.edit_message_text("🎬 Sending...")
         try:
             await ctx.bot.forward_message(cb.message.chat.id, CHANNEL_ID, msg_id)
@@ -155,6 +156,11 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["page"] = page + 1
     elif data == "prev":
         ctx.user_data["page"] = max(0, page - 1)
+    elif data == "first":
+        ctx.user_data["page"] = 0
+    elif data == "last":
+        total = (len(ctx.user_data["matches"]) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
+        ctx.user_data["page"] = total - 1
     elif data == "jump":
         ctx.user_data["await_jump"] = True
         return await cb.edit_message_text("🔢 Send page number:")
@@ -212,9 +218,10 @@ async def on_startup(app):
     me = await tg_client.get_me()
     print(f"✅ Logged in as: {me.username or me.first_name}")
 
-    if not os.path.exists("video_index.json"):
-        await fetch_and_update_index()
-    load_index()
+    if os.path.exists("video_index.json"):
+        load_index()
+    else:
+        asyncio.create_task(fetch_and_update_index())
 
 # --- Main ---
 def main():
