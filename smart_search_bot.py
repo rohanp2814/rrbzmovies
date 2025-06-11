@@ -199,6 +199,10 @@ def run_flask():
 
 # --- Startup ---
 async def on_startup(app):
+    await tg_client.connect()
+    me = await tg_client.get_me()
+    print(f"✅ Logged in as: {me.username or me.first_name}")
+
     if not os.path.exists("video_index.json"):
         await fetch_and_update_index()
     load_index()
