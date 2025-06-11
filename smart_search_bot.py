@@ -38,7 +38,7 @@ UNWANTED_PREFIXES = [
 # --- Helpers ---
 def normalize_title(t):
     t = t.lower()
-    t = re.sub(r'[\[\](){}<>._\-@]', ' ', t)
+    t = re.sub(r'[@\[\](){}<>._\-]', ' ', t)
     for pref in UNWANTED_PREFIXES:
         t = re.sub(re.escape(pref), ' ', t, flags=re.IGNORECASE)
     t = re.sub(r'\s+', ' ', t)
@@ -56,7 +56,6 @@ def load_index():
         titles.clear()
 
 async def fetch_and_update_index():
-    await tg_client.connect()
     messages = await tg_client.get_messages(CHANNEL_ID, limit=15000)
     current = {}
     added = 0
@@ -78,31 +77,32 @@ async def fetch_and_update_index():
                 added += 1
     with open("video_index.json", "w", encoding="utf-8") as f:
         json.dump(current, f, indent=2, ensure_ascii=False)
-    await tg_client.disconnect()
     logger.info(f"📦 Indexed {added} new videos")
     return added
 
 # --- Telegram Bot Handlers ---
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Use /search <movie> or /refresh")
+    await update.message.reply_text("👋 *Welcome to MovieBot!*\nUse /search <name> to find your movie.", parse_mode='Markdown')
 
 async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         return await update.message.reply_text("❗ Use: /search <movie name>")
-
-    query = normalize_title(" ".join(ctx.args))
-    results = process.extract(query, titles, scorer=fuzz.token_set_ratio, limit=20)
+    q = normalize_title(" ".join(ctx.args))
+    results = process.extract(q, titles, scorer=fuzz.token_sort_ratio, limit=20)
     matches = [(title, video_index[title]) for title, score, _ in results if score > 55]
 
     if not matches:
-        suggestions = [title for title, score, _ in results if score > 30][:5]
+        # Suggestions
+        suggestions = [(title, score) for title, score, _ in results if 30 < score <= 55][:5]
         if suggestions:
-            buttons = [[InlineKeyboardButton(text=s, callback_data=f"suggest_{s}")] for s in suggestions]
-            return await update.message.reply_text(
-                "❌ No exact matches found.\n\n🔍 Did you mean:",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-        return await update.message.reply_text("❌ No matches found at all.")
+            buttons = [
+                [InlineKeyboardButton(f"🔍 {title.title()} ({score}%)", callback_data=f"suggest_{title}")]
+                for title, score in suggestions
+            ]
+            await update.message.reply_text("❌ No exact matches. Try one of these:", reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await update.message.reply_text("❌ No matches found.")
+        return
 
     ctx.user_data["matches"], ctx.user_data["page"] = matches, 0
     await show_page(update, ctx)
@@ -136,24 +136,18 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = cb.data
 
     if data.startswith("suggest_"):
-        suggested_title = data[len("suggest_"):]
-        q = normalize_title(suggested_title)
-        results = process.extract(q, titles, scorer=fuzz.token_set_ratio, limit=20)
-        matches = [(title, video_index[title]) for title, score, _ in results if score > 55]
-        if not matches:
-            return await cb.message.reply_text("❌ Still no results.")
-        ctx.user_data["matches"], ctx.user_data["page"] = matches, 0
-        return await show_page(cb, ctx)
+        query = data.split("_", 1)[1]
+        update.message = cb.message
+        ctx.args = [query]
+        return await search(update, ctx)
 
     if data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
         await cb.edit_message_text("🎬 Sending...")
-        await tg_client.start()
         try:
             await ctx.bot.forward_message(cb.message.chat.id, CHANNEL_ID, msg_id)
         except Exception as e:
             return await cb.message.reply_text(f"⚠️ {e}")
-        await tg_client.disconnect()
         return await cb.message.reply_text("✅ Sent. Back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back")]]))
 
     page = ctx.user_data.get("page", 0)
@@ -217,10 +211,12 @@ async def on_startup(app):
     await tg_client.connect()
     me = await tg_client.get_me()
     print(f"✅ Logged in as: {me.username or me.first_name}")
+
     if not os.path.exists("video_index.json"):
         await fetch_and_update_index()
     load_index()
 
+# --- Main ---
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler("start", start))
