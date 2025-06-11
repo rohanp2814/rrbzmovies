@@ -1,240 +1,169 @@
-import os, json, logging, asyncio, re
+import asyncio
+import json
+import logging
+import os
+import re
 from threading import Thread
 from flask import Flask
-from rapidfuzz import process, fuzz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ContextTypes, filters
+    MessageHandler, filters, ContextTypes
 )
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-from session_string import SESSION
+from rapidfuzz import process, fuzz
+from apscheduler.schedulers.background import BackgroundScheduler
+from telethon.sync import TelegramClient
+from telethon.tl.types import DocumentAttributeVideo
 
-# --- Config ---
 API_ID = 26611044
-API_HASH = "9ef2ceed3bd6ac525020d757980f6864"
-BOT_TOKEN = "8126440223:AAHrzJZ_ymHplsQ3n99kJH09UQjuq1n6UP4"
+API_HASH = '9ef2ceed3bd6ac525020d757980f6864'
+BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
 CHANNEL_ID = -1002244686281
-ADMIN_ID = 1162354049
+SESSION_NAME = 'movie_indexer'
 
-# --- Init ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-tg_client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
 
-# --- Globals ---
 video_index = {}
 titles = []
-RESULTS_PER_PAGE = 5
+
 UNWANTED_PREFIXES = [
     'badshahpiratesofficial', 'mishrimovieshd', 'badshahpiratesoffical',
-    'badshahpirates', 'badshah', 'mishrimovies', 'mishri',
-    'clipmateempire', 'ap_files', 'runningmovieshd', 'filmygod',
-    'hindiwebseries', 'moviesverse', 'moviezverse', 'sflix',
-    'primevideo', 'clipmatemovies'
+    'badshahpirates', 'badshah', 'mishrimovies', 'mishri', 'clipmateempire',
+    'ap_files', 'runningmovieshd', '@runningmovieshd', 'filmygod', 'hindiwebseries',
+    'moviesverse', 'moviezverse', 'sflix', 'primevideo', 'clipmatemovies',
+    '@BadshahPiratesOfficial', '@ap_files', '[ap_files]', '[clipmateempire]'
 ]
 
-# --- Helpers ---
-def normalize_title(t):
-    t = t.lower()
-    t = re.sub(r'[@\[\](){}<>._\-]', ' ', t)
-    for pref in UNWANTED_PREFIXES:
-        t = re.sub(rf"\\b{re.escape(pref)}\\b", ' ', t, flags=re.IGNORECASE)
-    t = re.sub(r'\s+', ' ', t)
-    return t.strip()
+
+def normalize_title(title: str) -> str:
+    title = title.lower()
+    for prefix in UNWANTED_PREFIXES:
+        title = title.replace(prefix.lower(), '')
+    title = re.sub(r'\[@[^\]]+\]', '', title)
+    title = re.sub(r'\([^)]*\)', '', title)
+    title = re.sub(r'[\[\]@_.-]', ' ', title)
+    title = re.sub(r'\s+', ' ', title)
+    title = re.sub(r'[^\w\s]', '', title)
+    return title.strip()
+
+
+def save_index():
+    with open("video_index.json", "w", encoding="utf-8") as f:
+        json.dump(video_index, f, ensure_ascii=False, indent=2)
+
 
 def load_index():
-    global video_index, titles
-    try:
-        with open("video_index.json", "r", encoding="utf-8") as f:
+    global titles, video_index
+    if os.path.exists("video_index.json"):
+        with open("video_index.json", encoding="utf-8") as f:
             video_index = json.load(f)
-        titles[:] = list(video_index.keys())
-        logger.info(f"✅ Loaded {len(titles)} titles")
-    except FileNotFoundError:
-        video_index.clear()
-        titles.clear()
+        titles = list(video_index.keys())
+        logger.info(f"✅ Loaded {len(titles)} titles from index")
 
-async def fetch_and_update_index():
-    messages = await tg_client.get_messages(CHANNEL_ID, limit=15000)
-    current = {}
-    added = 0
-    for msg in messages:
-        if msg.video or msg.document:
-            filename = None
-            if msg.document and msg.document.attributes:
-                for attr in msg.document.attributes:
-                    if hasattr(attr, 'file_name'):
-                        filename = attr.file_name
-                        break
-            if not filename and msg.message:
-                filename = msg.message.strip()[:100]
-            if not filename:
-                continue
-            norm = normalize_title(filename)
-            if norm and norm not in current:
-                current[norm] = msg.id
-                added += 1
-    with open("video_index.json", "w", encoding="utf-8") as f:
-        json.dump(current, f, indent=2, ensure_ascii=False)
-    logger.info(f"📦 Indexed {added} new videos")
-    return added
 
-# --- Telegram Bot Handlers ---
-async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 *Welcome to MovieBot!*\nUse /search <name> to find your movie.", parse_mode='Markdown')
-
-async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.args:
-        return await update.message.reply_text("❗ Use: /search <movie name>")
-    q = normalize_title(" ".join(ctx.args))
-    results = process.extract(q, titles, scorer=fuzz.token_sort_ratio, limit=20)
-    matches = [(title, video_index[title]) for title, score, _ in results if score > 55]
-
-    if not matches:
-        suggestions = [(title, score) for title, score, _ in results if 30 < score <= 55][:5]
-        if suggestions:
-            buttons = [
-                [InlineKeyboardButton(f"🔍 {title.title()} ({score}%)", callback_data=f"suggest::{title}")]
-                for title, score in suggestions
-            ]
-            await update.message.reply_text("❌ No exact matches. Try one of these:", reply_markup=InlineKeyboardMarkup(buttons))
-        else:
-            await update.message.reply_text("❌ No matches found.")
-        return
-
-    ctx.user_data["matches"], ctx.user_data["page"] = matches, 0
-    await show_page(update, ctx)
-
-async def show_page(update_or_cb, ctx):
-    matches = ctx.user_data["matches"]
-    page = ctx.user_data.get("page", 0)
-    total = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
-    items = matches[page*RESULTS_PER_PAGE:(page+1)*RESULTS_PER_PAGE]
-    buttons = [[InlineKeyboardButton(t[:60], callback_data=f"movie_{mid}")] for t, mid in items]
-
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("⏮ First", callback_data="first"))
-        nav.append(InlineKeyboardButton("⬅ Prev", callback_data="prev"))
-    if page < total - 1:
-        nav.append(InlineKeyboardButton("Next ➡", callback_data="next"))
-        nav.append(InlineKeyboardButton("Last ⏭", callback_data="last"))
-    if nav:
-        buttons.append(nav)
-
-    buttons.append([InlineKeyboardButton("🔢 Jump to Page", callback_data="jump")])
-    kb = InlineKeyboardMarkup(buttons)
-    msg = f"📄 Page {page+1}/{total} — Select a movie:"
-    if isinstance(update_or_cb, Update):
-        await update_or_cb.message.reply_text(msg, reply_markup=kb)
-    else:
-        await update_or_cb.edit_message_text(msg, reply_markup=kb)
-
-async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cb = update.callback_query
-    await cb.answer()
-    data = cb.data
-
-    if data.startswith("suggest::"):
-        query = data.split("::", 1)[1]
-        ctx.args = [query]
-        fake_update = Update(update.update_id, message=cb.message)
-        return await search(fake_update, ctx)
-
-    if data.startswith("movie_"):
-        msg_id = int(data.split("_", 1)[1])
-        await cb.edit_message_text("🎬 Sending...")
-        try:
-            await ctx.bot.forward_message(cb.message.chat.id, CHANNEL_ID, msg_id)
-        except Exception as e:
-            return await cb.message.reply_text(f"⚠️ {e}")
-        return await cb.message.reply_text("✅ Sent. Back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back")]]))
-
-    page = ctx.user_data.get("page", 0)
-    if data == "next":
-        ctx.user_data["page"] = page + 1
-    elif data == "prev":
-        ctx.user_data["page"] = max(0, page - 1)
-    elif data == "first":
-        ctx.user_data["page"] = 0
-    elif data == "last":
-        total = (len(ctx.user_data["matches"]) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
-        ctx.user_data["page"] = total - 1
-    elif data == "jump":
-        ctx.user_data["await_jump"] = True
-        return await cb.edit_message_text("🔢 Send page number:")
-    elif data == "back":
-        return await show_page(cb, ctx)
-
-    await show_page(cb, ctx)
-
-async def jump(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.user_data.get("await_jump"):
-        return
-    ctx.user_data["await_jump"] = False
+def fetch_videos():
+    global video_index, titles
+    logger.info("📥 Fetching videos from channel...")
+    temp_index = {}
     try:
-        num = int(update.message.text.strip()) - 1
-        total = (len(ctx.user_data["matches"]) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
-        if 0 <= num < total:
-            ctx.user_data["page"] = num
-            return await show_page(update, ctx)
-        await update.message.reply_text(f"❗ Enter between 1 and {total}")
-    except:
-        await update.message.reply_text("❗ Invalid number.")
+        with TelegramClient(SESSION_NAME, API_ID, API_HASH) as client:
+            for message in client.iter_messages(CHANNEL_ID):
+                if message.video or (message.document and any(
+                    isinstance(attr, DocumentAttributeVideo) for attr in message.document.attributes)):
+                    title = message.text or message.document.attributes[0].file_name
+                    if title:
+                        norm_title = normalize_title(title)
+                        temp_index[norm_title] = message.video.file_id if message.video else message.document.id
+    except Exception as e:
+        logger.error(f"Failed to fetch: {e}")
+        return
+    video_index = temp_index
+    titles = list(video_index.keys())
+    save_index()
+    logger.info(f"📦 Indexed {len(titles)} new videos")
 
-async def refresh(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔄 Updating index...")
-    added = await fetch_and_update_index()
-    load_index()
-    await update.message.reply_text(f"✅ Done. Added {added} new.")
 
-async def reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return await update.message.reply_text("⛔ Unauthorized")
-    for fn in ("anon.session-journal", "video_index.json"):
-        try:
-            os.remove(fn)
-        except:
-            pass
-    await update.message.reply_text("🧹 Cleaned. Redeploy to re-auth.")
+app_flask = Flask(__name__)
 
-async def unknown(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❓ Unknown command. Try /search or /refresh")
-
-# --- Flask Keep-Alive ---
-flask = Flask("")
-
-@flask.route("/")
+@app_flask.route('/')
 def home():
-    return "🤖 Bot running"
+    return "🤖 Bot is running."
 
 def run_flask():
-    flask.run("0.0.0.0", 8080)
+    app_flask.run(host="0.0.0.0", port=8080)
 
-# --- Startup ---
-async def on_startup(app):
-    await tg_client.connect()
-    me = await tg_client.get_me()
-    print(f"✅ Logged in as: {me.username or me.first_name}")
 
-    if os.path.exists("video_index.json"):
-        load_index()
-    else:
-        asyncio.create_task(fetch_and_update_index())
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Send me a movie name to search.")
 
-# --- Main ---
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
+
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args).strip().lower() if context.args else update.message.text.strip().lower()
+    if not query:
+        await update.message.reply_text("❌ Please enter a movie name.")
+        return
+
+    norm_query = normalize_title(query)
+
+    if norm_query in video_index:
+        await update.message.reply_text(f"🎬 Found: {query}\nSending video...")
+        await context.bot.send_video(chat_id=update.effective_chat.id, video=video_index[norm_query])
+        return
+
+    matches = process.extract(norm_query, titles, scorer=fuzz.token_sort_ratio, limit=5)
+    matches = [m for m in matches if m[1] > 60]
+
+    if not matches:
+        await update.message.reply_text("❌ Movie not found. Try a different name.")
+        return
+
+    buttons = [
+        [InlineKeyboardButton(text=title, callback_data=f"movie::{title}")]
+        for title, score, _ in matches
+    ]
+    await update.message.reply_text("Did you mean:", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data.startswith("movie::"):
+        title = query.data.split("::", 1)[1]
+        file_id = video_index.get(title)
+        if file_id:
+            await query.edit_message_text(f"🎬 Sending: {title}")
+            await context.bot.send_video(chat_id=query.message.chat_id, video=file_id)
+        else:
+            await query.edit_message_text("❌ Video not found.")
+
+
+async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔄 Refreshing index...")
+    fetch_videos()
+    await update.message.reply_text("✅ Refreshed!")
+
+
+async def main():
+    load_index()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(fetch_videos, 'interval', minutes=30)
+    scheduler.start()
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("search", search))
     app.add_handler(CommandHandler("refresh", refresh))
-    app.add_handler(CommandHandler("reset", reset))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), jump))
-    app.add_handler(MessageHandler(filters.COMMAND, unknown))
-    Thread(target=run_flask).start()
-    app.run_polling()
+    app.add_handler(CommandHandler("search", search))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), search))
 
-if __name__ == "__main__":
-    main()
+    Thread(target=run_flask, daemon=True).start()
+    logger.info("🚀 Bot is running...")
+    await app.run_polling()
+
+
+if __name__ == '__main__':
+    import nest_asyncio
+    nest_asyncio.apply()
+    asyncio.run(main())
