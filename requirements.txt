@@ -7,3 +7,5 @@ textblob==0.17.1
 nltk==3.8.1
 telethon==1.30.3
 tqdm==4.66.1
+nest_asyncio
+
