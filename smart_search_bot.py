@@ -8,6 +8,9 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 from telethon import TelegramClient
+from telethon.sessions import StringSession
+from session_string import SESSION
+
 
 # --- Config ---
 API_ID = 26611044
@@ -23,7 +26,8 @@ ADMIN_ID = 1162354049  # 👈 Replace this with your actual Telegram user ID
 # --- Init ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-tg_client = TelegramClient("anon", API_ID, API_HASH)
+tg_client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
+
 
 # --- Globals ---
 video_index = {}
