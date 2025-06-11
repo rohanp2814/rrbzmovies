@@ -16,7 +16,7 @@ from session_string import SESSION
 API_ID = 26611044
 API_HASH = "9ef2ceed3bd6ac525020d757980f6864"
 BOT_TOKEN = "8126440223:AAHrzJZ_ymHplsQ3n99kJH09UQjuq1n6UP4"
-CHANNEL_ID = "-1002244686281"
+CHANNEL_ID = -1002244686281
 ADMIN_ID = 1162354049  # 👈 Replace this with your actual Telegram user ID
 
 
