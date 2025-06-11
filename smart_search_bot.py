@@ -11,25 +11,16 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from session_string import SESSION
 
-
-# --- Config ---
 API_ID = 26611044
 API_HASH = "9ef2ceed3bd6ac525020d757980f6864"
 BOT_TOKEN = "8126440223:AAHrzJZ_ymHplsQ3n99kJH09UQjuq1n6UP4"
 CHANNEL_ID = -1002244686281
-ADMIN_ID = 1162354049  # 👈 Replace this with your actual Telegram user ID
+ADMIN_ID = 1162354049
 
-
-
-
-
-# --- Init ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 tg_client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
 
-
-# --- Globals ---
 video_index = {}
 titles = []
 RESULTS_PER_PAGE = 5
@@ -41,10 +32,9 @@ UNWANTED_PREFIXES = [
     'primevideo', 'clipmatemovies'
 ]
 
-# --- Helpers ---
 def normalize_title(t):
     t = t.lower()
-    t = re.sub(r'[\[\](){}<>._\-@]', ' ', t)
+    t = re.sub(r'[@\[\](){}<>._\-]', ' ', t)
     for pref in UNWANTED_PREFIXES:
         t = re.sub(re.escape(pref), ' ', t, flags=re.IGNORECASE)
     t = re.sub(r'\s+', ' ', t)
@@ -88,9 +78,16 @@ async def fetch_and_update_index():
     logger.info(f"📦 Indexed {added} new videos")
     return added
 
-# --- Telegram Bot Handlers ---
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Use /search <movie> or /refresh")
+    await update.message.reply_text(
+        "👋 *Welcome to MovieBot!*
+
+"
+        "🎬 Use /search <movie name> to find your favorite films
+"
+        "🔄 Use /refresh to sync latest uploads",
+        parse_mode="Markdown"
+    )
 
 async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
@@ -108,19 +105,19 @@ async def show_page(update_or_cb, ctx):
     page = ctx.user_data.get("page", 0)
     total = (len(matches) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
     items = matches[page*RESULTS_PER_PAGE:(page+1)*RESULTS_PER_PAGE]
-    buttons = [[InlineKeyboardButton(t[:60], callback_data=f"movie_{mid}")] for t, mid in items]
-    
+    buttons = [[InlineKeyboardButton(f"🎬 {t[:50]}", callback_data=f"movie_{mid}")] for t, mid in items]
+
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data="prev"))
+        nav.append(InlineKeyboardButton("👈 Previous", callback_data="prev"))
     if page < total - 1:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data="next"))
+        nav.append(InlineKeyboardButton("Next 👉", callback_data="next"))
     if nav:
         buttons.append(nav)
 
-    buttons.append([InlineKeyboardButton("🔢 Jump", callback_data="jump")])
+    buttons.append([InlineKeyboardButton("🚀 Jump to Page", callback_data="jump")])
     kb = InlineKeyboardMarkup(buttons)
-    msg = f"📄 Page {page+1}/{total} — Select a movie:"
+    msg = f"🎯 Top Matches (Page {page+1}/{total})"
     if isinstance(update_or_cb, Update):
         await update_or_cb.message.reply_text(msg, reply_markup=kb)
     else:
@@ -132,15 +129,15 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = cb.data
     if data.startswith("movie_"):
         msg_id = int(data.split("_")[1])
-        await cb.edit_message_text("🎬 Sending...")
+        await cb.edit_message_text("📤 Sending movie... Please wait")
         await tg_client.start()
         try:
             await ctx.bot.forward_message(cb.message.chat.id, CHANNEL_ID, msg_id)
         except Exception as e:
             return await cb.message.reply_text(f"⚠️ {e}")
         await tg_client.disconnect()
-        return await cb.message.reply_text("✅ Sent. Back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back")]]))
-    
+        return await cb.message.reply_text("✅ Sent. Back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Return to List", callback_data="back")]]))
+
     page = ctx.user_data.get("page", 0)
     if data == "next":
         ctx.user_data["page"] = page + 1
@@ -148,10 +145,10 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["page"] = max(0, page - 1)
     elif data == "jump":
         ctx.user_data["await_jump"] = True
-        return await cb.edit_message_text("🔢 Send page number:")
+        return await cb.edit_message_text("🚀 Send page number:")
     elif data == "back":
         return await show_page(cb, ctx)
-    
+
     await show_page(cb, ctx)
 
 async def jump(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -169,25 +166,28 @@ async def jump(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ Invalid number.")
 
 async def refresh(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔄 Updating index...")
+    await update.message.reply_text("🔄 Updating index... Please wait")
     added = await fetch_and_update_index()
     load_index()
-    await update.message.reply_text(f"✅ Done. Added {added} new.")
+    await update.message.reply_text(f"✅ Index refreshed. Added {added} new videos.")
 
 async def reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return await update.message.reply_text("⛔ Unauthorized")
-    for fn in ("anon.session-journal", "video_index.json"):  # ⛔ Don't delete anon.session
+    for fn in ("anon.session-journal", "video_index.json"):
         try:
             os.remove(fn)
         except:
             pass
     await update.message.reply_text("🧹 Cleaned. Redeploy to re-auth.")
 
+async def reload_index(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    load_index()
+    await update.message.reply_text("🔁 Index reloaded from disk.")
+
 async def unknown(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❓ Unknown command. Try /search or /refresh")
 
-# --- Flask Keep-Alive ---
 flask = Flask("")
 
 @flask.route("/")
@@ -197,12 +197,10 @@ def home():
 def run_flask():
     flask.run("0.0.0.0", 8080)
 
-# --- Startup ---
 async def on_startup(app):
     await tg_client.connect()
     me = await tg_client.get_me()
     print(f"✅ Logged in as: {me.username or me.first_name}")
-
     if not os.path.exists("video_index.json"):
         await fetch_and_update_index()
     load_index()
@@ -213,6 +211,7 @@ def main():
     app.add_handler(CommandHandler("search", search))
     app.add_handler(CommandHandler("refresh", refresh))
     app.add_handler(CommandHandler("reset", reset))
+    app.add_handler(CommandHandler("reloadindex", reload_index))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), jump))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
