@@ -1,0 +1,65 @@
+import json
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from rapidfuzz import process
+
+from telethon.sync import TelegramClient
+from telethon.tl.functions.messages import GetHistoryRequest
+from telethon.tl.types import InputPeerChannel, PeerChannel
+
+API_ID = '26611044'  # Replace with your real API ID
+API_HASH = '9ef2ceed3bd6ac525020d757980f6864'  # Replace with your real API Hash
+BOT_TOKEN = '8126440223:AAHg6ML8Ymw3FgAKr1DZAmuFdWfpm_7GBDM'
+CHANNEL_ID = -1002244686281  # Replace with your real channel ID
+
+# Load index
+with open('video_index.json', 'r', encoding='utf-8') as f:
+    video_index = json.load(f)
+
+# Only titles and message_ids
+titles = [v["title"] for v in video_index]
+id_map = {v["title"]: v["message_id"] for v in video_index}
+
+# Logging
+logging.basicConfig(level=logging.INFO)
+
+# Telethon client to fetch and resend videos
+tg_client = TelegramClient("anon", API_ID, API_HASH)
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.strip()
+    if not query:
+        await update.message.reply_text("❌ Please type a movie name.")
+        return
+
+    # Fuzzy search for top 5 matches
+    matches = process.extract(query, titles, limit=5, scorer=process.fuzz.WRatio)
+    if not matches:
+        await update.message.reply_text("😕 No matches found.")
+        return
+
+    await update.message.reply_text("🔍 Searching...")
+
+    await tg_client.start()
+
+    for title, score, _ in matches:
+        msg_id = id_map[title]
+        try:
+            # Forward or copy video from channel to user
+            await tg_client.forward_messages(
+                entity=update.message.chat_id,
+                messages=msg_id,
+                from_peer=PeerChannel(CHANNEL_ID)
+            )
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Couldn't send: {title}\n{e}")
+
+    await tg_client.disconnect()
+
+# Main
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+print("🤖 Bot is running... Press Ctrl+C to stop.")
+app.run_polling()

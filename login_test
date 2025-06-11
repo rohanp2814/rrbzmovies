@@ -1,0 +1,7 @@
+from telethon.sync import TelegramClient
+
+api_id = 26611044       # Replace with your actual API ID
+api_hash = '9ef2ceed3bd6ac525020d757980f6864'  # Replace with your actual API hash
+
+with TelegramClient("anon", api_id, api_hash) as client:
+    print("✅ Logged in as", client.get_me().username)

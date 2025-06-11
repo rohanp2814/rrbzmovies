@@ -1,0 +1,9 @@
+rapidfuzz
+Flask
+python-telegram-bot==20.7
+httpx==0.25.2
+APScheduler==3.10.4
+textblob==0.17.1
+nltk==3.8.1
+telethon==1.30.3
+tqdm==4.66.1

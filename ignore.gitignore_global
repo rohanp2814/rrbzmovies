@@ -1,0 +1,30 @@
+# Ignore session files
+*.session
+*.session-journal
+
+# Ignore logs and indexes
+*.log
+*.json
+
+# Ignore compiled and cache files
+__pycache__/
+*.pyc
+
+# Ignore IDE/workspace files
+*.rar
+*.zip
+*.tar
+*.7z
+*.db
+*.ini
+.vscode/
+*.lnk
+
+# Ignore video/media files
+*.mp4
+*.mkv
+*.webm
+
+# Ignore OS specific files
+Thumbs.db
+desktop.ini
